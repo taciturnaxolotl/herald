@@ -14,16 +14,27 @@ import (
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	host := parseOriginHost(s.origin)
+	
+	// Get short commit hash (first 7 chars)
+	shortHash := s.commitHash
+	if len(shortHash) > 7 {
+		shortHash = shortHash[:7]
+	}
+	
 	data := struct {
-		Origin     string
-		OriginHost string
-		SSHHost    string
-		SSHPort    int
+		Origin          string
+		OriginHost      string
+		SSHHost         string
+		SSHPort         int
+		CommitHash      string
+		ShortCommitHash string
 	}{
-		Origin:     s.origin,
-		OriginHost: stripProtocol(s.origin),
-		SSHHost:    host,
-		SSHPort:    s.sshPort,
+		Origin:          s.origin,
+		OriginHost:      stripProtocol(s.origin),
+		SSHHost:         host,
+		SSHPort:         s.sshPort,
+		CommitHash:      s.commitHash,
+		ShortCommitHash: shortHash,
 	}
 	if err := s.tmpl.ExecuteTemplate(w, "index.html", data); err != nil {
 		s.logger.Error("render index", "err", err)

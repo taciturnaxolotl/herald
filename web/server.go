@@ -15,23 +15,25 @@ import (
 var templatesFS embed.FS
 
 type Server struct {
-	store   *store.DB
-	addr    string
-	origin  string
-	sshPort int
-	logger  *log.Logger
-	tmpl    *template.Template
+	store      *store.DB
+	addr       string
+	origin     string
+	sshPort    int
+	logger     *log.Logger
+	tmpl       *template.Template
+	commitHash string
 }
 
-func NewServer(st *store.DB, addr string, origin string, sshPort int, logger *log.Logger) *Server {
+func NewServer(st *store.DB, addr string, origin string, sshPort int, logger *log.Logger, commitHash string) *Server {
 	tmpl := template.Must(template.ParseFS(templatesFS, "templates/*.html"))
 	return &Server{
-		store:   st,
-		addr:    addr,
-		origin:  origin,
-		sshPort: sshPort,
-		logger:  logger,
-		tmpl:    tmpl,
+		store:      st,
+		addr:       addr,
+		origin:     origin,
+		sshPort:    sshPort,
+		logger:     logger,
+		tmpl:       tmpl,
+		commitHash: commitHash,
 	}
 }
 

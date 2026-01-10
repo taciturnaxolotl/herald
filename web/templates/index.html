@@ -45,5 +45,9 @@
     # Manual run
     ssh {{if ne .SSHPort 22}}-p {{.SSHPort}} {{end}}herald@{{.SSHHost}} run feeds.txt
 </pre>
+<footer>
+    <span>Kieran Klukas &lt;https://dunkirk.sh&gt;</span>
+    <span><a href="https://tangled.org/dunkirk.sh/herald/commit/{{.CommitHash}}">{{.ShortCommitHash}}</a></span>
+</footer>
 </body>
 </html>

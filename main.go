@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/fang"
@@ -19,9 +21,10 @@ import (
 )
 
 var (
-	version   = "dev"
-	cfgFile   string
-	logger    *log.Logger
+	version    = "dev"
+	commitHash = "dev"
+	cfgFile    string
+	logger     *log.Logger
 )
 
 func main() {
@@ -121,6 +124,21 @@ allow_all_keys: true
 	}
 }
 
+func getCommitHash() string {
+	// Prefer build-time embedded hash
+	if commitHash != "" && commitHash != "dev" {
+		return commitHash
+	}
+	
+	// Fallback to runtime git query
+	cmd := exec.Command("git", "log", "-1", "--format=%H")
+	output, err := cmd.Output()
+	if err != nil {
+		return "dev"
+	}
+	return strings.TrimSpace(string(output))
+}
+
 func runServer(ctx context.Context) error {
 	cfg, err := config.LoadAppConfig(cfgFile)
 	if err != nil {
@@ -161,7 +179,7 @@ func runServer(ctx context.Context) error {
 		AllowedKeys:  cfg.AllowedKeys,
 	}, db, sched, logger)
 
-	webServer := web.NewServer(db, fmt.Sprintf("%s:%d", cfg.Host, cfg.HTTPPort), cfg.Origin, cfg.ExternalSSHPort, logger)
+	webServer := web.NewServer(db, fmt.Sprintf("%s:%d", cfg.Host, cfg.HTTPPort), cfg.Origin, cfg.ExternalSSHPort, logger, getCommitHash())
 
 	g, ctx := errgroup.WithContext(ctx)
 

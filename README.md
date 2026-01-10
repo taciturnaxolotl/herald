@@ -10,7 +10,7 @@ The canonical repo for this is hosted on tangled over at [`dunkirk.sh/herald`](h
 
 ```bash
 # Build
-go build -o herald .
+go build -ldflags "-X main.commitHash=$(git log -1 --format=%H)" -o herald .
 
 # Run the server
 ./herald serve
@@ -18,6 +18,8 @@ go build -o herald .
 # Or with a config file
 ./herald serve -c config.yaml
 ```
+
+> **Note:** The commit hash is automatically detected at runtime if not embedded at build time.
 
 ## Usage
 
