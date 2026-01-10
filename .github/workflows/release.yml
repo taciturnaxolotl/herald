@@ -38,7 +38,8 @@ jobs:
             runner: ubuntu-latest
           - goos: linux
             goarch: arm64
-            runner: ubuntu-24.04-arm64
+            runner: ubuntu-latest
+            cc: aarch64-linux-gnu-gcc
           - goos: darwin
             goarch: amd64
             runner: macos-15-intel
@@ -58,11 +59,18 @@ jobs:
           go-version-file: 'go.mod'
           cache: true
 
+      - name: Install cross-compilation toolchain
+        if: matrix.cc != ''
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
       - name: Build
         env:
           CGO_ENABLED: 1
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
+          CC: ${{ matrix.cc }}
         run: |
           VERSION="${{ github.ref_name }}"
           COMMIT_HASH="$(git rev-parse HEAD)"
