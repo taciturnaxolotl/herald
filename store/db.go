@@ -108,6 +108,19 @@ func (db *DB) migrate() error {
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 
+	CREATE TABLE IF NOT EXISTS email_sends (
+		id INTEGER PRIMARY KEY,
+		config_id INTEGER NOT NULL REFERENCES configs(id) ON DELETE CASCADE,
+		recipient TEXT NOT NULL,
+		subject TEXT NOT NULL,
+		tracking_token TEXT UNIQUE,
+		sent_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		bounced BOOLEAN DEFAULT FALSE,
+		bounce_reason TEXT,
+		opened BOOLEAN DEFAULT FALSE,
+		opened_at DATETIME
+	);
+
 	CREATE INDEX IF NOT EXISTS idx_configs_user_id ON configs(user_id);
 	CREATE INDEX IF NOT EXISTS idx_configs_active_next_run ON configs(next_run) WHERE next_run IS NOT NULL;
 	CREATE INDEX IF NOT EXISTS idx_feeds_config_id ON feeds(config_id);
@@ -115,6 +128,9 @@ func (db *DB) migrate() error {
 	CREATE INDEX IF NOT EXISTS idx_logs_config_id ON logs(config_id);
 	CREATE INDEX IF NOT EXISTS idx_logs_created_at ON logs(created_at);
 	CREATE INDEX IF NOT EXISTS idx_unsubscribe_tokens_token ON unsubscribe_tokens(token);
+	CREATE INDEX IF NOT EXISTS idx_email_sends_config_id ON email_sends(config_id);
+	CREATE INDEX IF NOT EXISTS idx_email_sends_tracking_token ON email_sends(tracking_token);
+	CREATE INDEX IF NOT EXISTS idx_email_sends_sent_at ON email_sends(sent_at);
 	`
 
 	_, err := db.Exec(schema)

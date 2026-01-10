@@ -3,6 +3,7 @@ herald
 
 # Config
 config.yaml
+*.pem
 
 # Database
 *.db*

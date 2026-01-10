@@ -25,11 +25,15 @@ type AppConfig struct {
 }
 
 type SMTPConfig struct {
-	Host string `yaml:"host"`
-	Port int    `yaml:"port"`
-	User string `yaml:"user"`
-	Pass string `yaml:"pass"`
-	From string `yaml:"from"`
+	Host               string `yaml:"host"`
+	Port               int    `yaml:"port"`
+	User               string `yaml:"user"`
+	Pass               string `yaml:"pass"`
+	From               string `yaml:"from"`
+	DKIMPrivateKey     string `yaml:"dkim_private_key"`
+	DKIMPrivateKeyFile string `yaml:"dkim_private_key_file"`
+	DKIMSelector       string `yaml:"dkim_selector"`
+	DKIMDomain         string `yaml:"dkim_domain"`
 }
 
 func DefaultAppConfig() *AppConfig {
@@ -142,6 +146,18 @@ func applyEnvOverrides(cfg *AppConfig) {
 	}
 	if v := os.Getenv("HERALD_SMTP_FROM"); v != "" {
 		cfg.SMTP.From = v
+	}
+	if v := os.Getenv("HERALD_SMTP_DKIM_PRIVATE_KEY"); v != "" {
+		cfg.SMTP.DKIMPrivateKey = v
+	}
+	if v := os.Getenv("HERALD_SMTP_DKIM_PRIVATE_KEY_FILE"); v != "" {
+		cfg.SMTP.DKIMPrivateKeyFile = v
+	}
+	if v := os.Getenv("HERALD_SMTP_DKIM_SELECTOR"); v != "" {
+		cfg.SMTP.DKIMSelector = v
+	}
+	if v := os.Getenv("HERALD_SMTP_DKIM_DOMAIN"); v != "" {
+		cfg.SMTP.DKIMDomain = v
 	}
 	if v := os.Getenv("HERALD_ALLOW_ALL_KEYS"); v != "" {
 		cfg.AllowAllKeys = strings.ToLower(v) == "true"

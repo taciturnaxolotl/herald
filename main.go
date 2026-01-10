@@ -146,13 +146,20 @@ func runServer(ctx context.Context) error {
 		return fmt.Errorf("failed to migrate database: %w", err)
 	}
 
-	mailer := email.NewMailer(email.SMTPConfig{
-		Host: cfg.SMTP.Host,
-		Port: cfg.SMTP.Port,
-		User: cfg.SMTP.User,
-		Pass: cfg.SMTP.Pass,
-		From: cfg.SMTP.From,
+	mailer, err := email.NewMailer(email.SMTPConfig{
+		Host:               cfg.SMTP.Host,
+		Port:               cfg.SMTP.Port,
+		User:               cfg.SMTP.User,
+		Pass:               cfg.SMTP.Pass,
+		From:               cfg.SMTP.From,
+		DKIMPrivateKey:     cfg.SMTP.DKIMPrivateKey,
+		DKIMPrivateKeyFile: cfg.SMTP.DKIMPrivateKeyFile,
+		DKIMSelector:       cfg.SMTP.DKIMSelector,
+		DKIMDomain:         cfg.SMTP.DKIMDomain,
 	}, cfg.Origin)
+	if err != nil {
+		return fmt.Errorf("failed to create mailer: %w", err)
+	}
 
 	// Validate SMTP configuration
 	if err := mailer.ValidateConfig(); err != nil {

@@ -1,33 +1,85 @@
 package email
 
 import (
+	"bytes"
+	"crypto/rsa"
 	"crypto/tls"
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
 	"mime"
 	"mime/quotedprintable"
 	"net"
 	"net/smtp"
+	"os"
 	"strings"
+	"time"
+
+	"github.com/emersion/go-msgauth/dkim"
 )
 
 type SMTPConfig struct {
-	Host string
-	Port int
-	User string
-	Pass string
-	From string
+	Host               string
+	Port               int
+	User               string
+	Pass               string
+	From               string
+	DKIMPrivateKey     string
+	DKIMPrivateKeyFile string
+	DKIMSelector       string
+	DKIMDomain         string
 }
 
 type Mailer struct {
 	cfg          SMTPConfig
 	unsubBaseURL string
+	dkimKey      *rsa.PrivateKey
 }
 
-func NewMailer(cfg SMTPConfig, unsubBaseURL string) *Mailer {
-	return &Mailer{
+func NewMailer(cfg SMTPConfig, unsubBaseURL string) (*Mailer, error) {
+	m := &Mailer{
 		cfg:          cfg,
 		unsubBaseURL: unsubBaseURL,
 	}
+
+	// Parse DKIM private key if provided
+	var keyData string
+	if cfg.DKIMPrivateKey != "" {
+		keyData = cfg.DKIMPrivateKey
+	} else if cfg.DKIMPrivateKeyFile != "" {
+		keyBytes, err := os.ReadFile(cfg.DKIMPrivateKeyFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read DKIM private key file: %w", err)
+		}
+		keyData = string(keyBytes)
+	}
+
+	if keyData != "" && strings.Contains(keyData, "BEGIN") {
+		// Replace literal \n with actual newlines (for .env file compatibility)
+		keyData = strings.ReplaceAll(keyData, "\\n", "\n")
+
+		block, _ := pem.Decode([]byte(keyData))
+		if block == nil {
+			return nil, fmt.Errorf("failed to decode DKIM private key PEM")
+		}
+
+		key, err := x509.ParsePKCS1PrivateKey(block.Bytes)
+		if err != nil {
+			// Try PKCS8 format
+			keyInterface, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse DKIM private key: %w", err)
+			}
+			var ok bool
+			key, ok = keyInterface.(*rsa.PrivateKey)
+			if !ok {
+				return nil, fmt.Errorf("DKIM private key is not RSA")
+			}
+		}
+		m.dkimKey = key
+	}
+
+	return m, nil
 }
 
 // ValidateConfig tests SMTP connectivity and auth
@@ -122,7 +174,7 @@ func (m *Mailer) Send(to, subject, htmlBody, textBody, unsubToken, dashboardURL 
 				htmlFooter.WriteString(" • ")
 				textFooter.WriteString("")
 			}
-			htmlFooter.WriteString(fmt.Sprintf(`<a href="%s">Unsubscribe</a>`, unsubURL))
+			htmlFooter.WriteString(fmt.Sprintf(`<a href="%s">unsubscribe</a>`, unsubURL))
 			textFooter.WriteString(fmt.Sprintf("unsubscribe: %s\n", unsubURL))
 		}
 
@@ -177,16 +229,27 @@ func (m *Mailer) Send(to, subject, htmlBody, textBody, unsubToken, dashboardURL 
 
 	msg.WriteString(fmt.Sprintf("--%s--\r\n", boundary))
 
+	messageBytes := []byte(msg.String())
+
+	// Sign with DKIM if configured
+	if m.dkimKey != nil && m.cfg.DKIMDomain != "" && m.cfg.DKIMSelector != "" {
+		signed, err := m.signDKIM(messageBytes)
+		if err != nil {
+			return fmt.Errorf("DKIM signing: %w", err)
+		}
+		messageBytes = signed
+	}
+
 	var auth smtp.Auth
 	if m.cfg.User != "" && m.cfg.Pass != "" {
 		auth = smtp.PlainAuth("", m.cfg.User, m.cfg.Pass, m.cfg.Host)
 	}
 
 	if m.cfg.Port == 465 {
-		return m.sendWithTLS(addr, auth, to, msg.String())
+		return m.sendWithTLS(addr, auth, to, messageBytes)
 	}
 
-	return smtp.SendMail(addr, auth, m.cfg.From, []string{to}, []byte(msg.String()))
+	return smtp.SendMail(addr, auth, m.cfg.From, []string{to}, messageBytes)
 }
 
 func encodeQuotedPrintable(s string) string {
@@ -197,7 +260,7 @@ func encodeQuotedPrintable(s string) string {
 	return buf.String()
 }
 
-func (m *Mailer) sendWithTLS(addr string, auth smtp.Auth, to, msg string) error {
+func (m *Mailer) sendWithTLS(addr string, auth smtp.Auth, to string, msg []byte) error {
 	tlsConfig := &tls.Config{
 		ServerName: m.cfg.Host,
 		MinVersion: tls.VersionTLS12,
@@ -234,7 +297,7 @@ func (m *Mailer) sendWithTLS(addr string, auth smtp.Auth, to, msg string) error 
 		return fmt.Errorf("data: %w", err)
 	}
 
-	if _, err = w.Write([]byte(msg)); err != nil {
+	if _, err = w.Write(msg); err != nil {
 		return fmt.Errorf("write: %w", err)
 	}
 
@@ -243,4 +306,29 @@ func (m *Mailer) sendWithTLS(addr string, auth smtp.Auth, to, msg string) error 
 	}
 
 	return client.Quit()
+}
+
+func (m *Mailer) signDKIM(message []byte) ([]byte, error) {
+	options := &dkim.SignOptions{
+		Domain:                 m.cfg.DKIMDomain,
+		Selector:               m.cfg.DKIMSelector,
+		Signer:                 m.dkimKey,
+		HeaderCanonicalization: dkim.CanonicalizationRelaxed,
+		BodyCanonicalization:   dkim.CanonicalizationRelaxed,
+		HeaderKeys: []string{
+			"From",
+			"To",
+			"Subject",
+			"List-Unsubscribe",
+			"List-Unsubscribe-Post",
+		},
+		Expiration: time.Now().Add(72 * time.Hour),
+	}
+
+	var b bytes.Buffer
+	if err := dkim.Sign(&b, bytes.NewReader(message), options); err != nil {
+		return nil, err
+	}
+
+	return b.Bytes(), nil
 }
