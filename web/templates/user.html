@@ -19,6 +19,12 @@
         <a href="{{.URL}}">{{.Filename}}</a> ({{.FeedCount}} feeds)
         - <a href="{{.FeedXMLURL}}">RSS</a>
         - <a href="{{.FeedJSONURL}}">JSON</a>
+        {{if gt .TotalSends 0}}
+        <br><span style="font-size: 0.9em; color: #666;">
+            📧 {{.TotalSends}} sent, {{.Opens}} opened ({{printf "%.1f" .OpenRate}}%)
+            {{if ge .LastOpenDays 0}}• last opened {{.LastOpenDays}}d ago{{end}}
+        </span>
+        {{end}}
     </li>
 {{else}}
     <li>No configs uploaded</li>

@@ -117,25 +117,44 @@ func (db *DB) GetInactiveConfigs(daysWithoutOpen int, minSends int) ([]int64, er
 
 // GetConfigEngagement returns engagement stats for a config
 func (db *DB) GetConfigEngagement(configID int64, days int) (totalSends, opens, bounces int, lastOpen *time.Time, err error) {
-	query := `
+	// First get counts
+	countQuery := `
 		SELECT
 			COUNT(*) as total_sends,
-			SUM(CASE WHEN opened = TRUE THEN 1 ELSE 0 END) as opens,
-			SUM(CASE WHEN bounced = TRUE THEN 1 ELSE 0 END) as bounces,
-			MAX(opened_at) as last_open
+			COALESCE(SUM(CASE WHEN opened = TRUE THEN 1 ELSE 0 END), 0) as opens,
+			COALESCE(SUM(CASE WHEN bounced = TRUE THEN 1 ELSE 0 END), 0) as bounces
 		FROM email_sends
 		WHERE config_id = ?
 		AND sent_at > datetime('now', '-' || ? || ' days')
 	`
 
-	var lastOpenTime sql.NullTime
-	err = db.QueryRow(query, configID, days).Scan(&totalSends, &opens, &bounces, &lastOpenTime)
+	err = db.QueryRow(countQuery, configID, days).Scan(&totalSends, &opens, &bounces)
 	if err != nil {
-		return 0, 0, 0, nil, fmt.Errorf("query engagement: %w", err)
+		return 0, 0, 0, nil, fmt.Errorf("query engagement counts: %w", err)
 	}
 
-	if lastOpenTime.Valid {
-		lastOpen = &lastOpenTime.Time
+	// Get most recent open
+	openQuery := `
+		SELECT opened_at
+		FROM email_sends
+		WHERE config_id = ?
+		AND opened = TRUE
+		AND sent_at > datetime('now', '-' || ? || ' days')
+		ORDER BY opened_at DESC
+		LIMIT 1
+	`
+
+	var lastOpenStr sql.NullString
+	err = db.QueryRow(openQuery, configID, days).Scan(&lastOpenStr)
+	if err != nil && err != sql.ErrNoRows {
+		return 0, 0, 0, nil, fmt.Errorf("query last open: %w", err)
+	}
+
+	if lastOpenStr.Valid && lastOpenStr.String != "" {
+		t, err := time.Parse("2006-01-02 15:04:05", lastOpenStr.String)
+		if err == nil {
+			lastOpen = &t
+		}
 	}
 
 	return totalSends, opens, bounces, lastOpen, nil

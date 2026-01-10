@@ -233,3 +233,23 @@ func (db *DB) ActivateConfig(ctx context.Context, userID int64, filename string)
 	}
 	return nil
 }
+
+func (db *DB) UpdateNextRun(ctx context.Context, configID int64, nextRun *time.Time) error {
+	var err error
+	if nextRun == nil {
+		_, err = db.ExecContext(ctx,
+			`UPDATE configs SET next_run = NULL WHERE id = ?`,
+			configID,
+		)
+	} else {
+		_, err = db.ExecContext(ctx,
+			`UPDATE configs SET next_run = ? WHERE id = ?`,
+			nextRun,
+			configID,
+		)
+	}
+	if err != nil {
+		return fmt.Errorf("update next run: %w", err)
+	}
+	return nil
+}

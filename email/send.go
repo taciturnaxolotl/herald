@@ -150,7 +150,7 @@ func (m *Mailer) ValidateConfig() error {
 	return client.Quit()
 }
 
-func (m *Mailer) Send(to, subject, htmlBody, textBody, unsubToken, dashboardURL string) error {
+func (m *Mailer) Send(to, subject, htmlBody, textBody, unsubToken, dashboardURL, trackingToken string) error {
 	addr := net.JoinHostPort(m.cfg.Host, fmt.Sprintf("%d", m.cfg.Port))
 
 	boundary := "==herald-boundary-a1b2c3d4e5f6=="
@@ -223,7 +223,15 @@ func (m *Mailer) Send(to, subject, htmlBody, textBody, unsubToken, dashboardURL 
 	msg.WriteString(fmt.Sprintf("--%s\r\n", boundary))
 	msg.WriteString("Content-Type: text/html; charset=utf-8\r\n")
 	msg.WriteString("Content-Transfer-Encoding: quoted-printable\r\n\r\n")
-	htmlQP := encodeQuotedPrintable(htmlBody)
+	
+	// Add tracking pixel if token provided
+	htmlBodyWithTracking := htmlBody
+	if trackingToken != "" {
+		trackingURL := m.unsubBaseURL + "/t/" + trackingToken + ".gif"
+		htmlBodyWithTracking = htmlBody + fmt.Sprintf(`<img src="%s" width="1" height="1" alt="" style="display:none;">`, trackingURL)
+	}
+	
+	htmlQP := encodeQuotedPrintable(htmlBodyWithTracking)
 	msg.WriteString(htmlQP)
 	msg.WriteString("\r\n")
 

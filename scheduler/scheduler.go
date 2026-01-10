@@ -22,9 +22,14 @@ const (
 	cleanupInterval    = 24 * time.Hour
 	seenItemsRetention = 6 * 30 * 24 * time.Hour // 6 months
 	itemMaxAge         = 3 * 30 * 24 * time.Hour // 3 months
+	emailSendsRetention = 6 * 30 // 6 months in days
 
 	// Item limits
 	minItemsForDigest = 5
+
+	// Engagement tracking
+	inactivityThreshold = 90  // days without opens
+	minSendsBeforeDeactivate = 3  // minimum sends before considering deactivation
 )
 
 type Scheduler struct {
@@ -55,10 +60,15 @@ func (s *Scheduler) Start(ctx context.Context) {
 	cleanupTicker := time.NewTicker(24 * time.Hour)
 	defer cleanupTicker.Stop()
 
+	// Engagement check ticker runs weekly
+	engagementTicker := time.NewTicker(7 * 24 * time.Hour)
+	defer engagementTicker.Stop()
+
 	s.logger.Info("scheduler started", "interval", s.interval)
 
 	// Run cleanup on start
 	s.cleanupOldSeenItems(ctx)
+	s.cleanupOldEmailSends(ctx)
 
 	for {
 		select {
@@ -69,6 +79,9 @@ func (s *Scheduler) Start(ctx context.Context) {
 			s.tick(ctx)
 		case <-cleanupTicker.C:
 			s.cleanupOldSeenItems(ctx)
+			s.cleanupOldEmailSends(ctx)
+		case <-engagementTicker.C:
+			s.checkAndDeactivateInactiveConfigs(ctx)
 		}
 	}
 }
@@ -87,6 +100,65 @@ func (s *Scheduler) cleanupOldSeenItems(ctx context.Context) {
 	}
 	if deleted > 0 {
 		s.logger.Info("cleaned up old seen items", "deleted", deleted)
+	}
+}
+
+func (s *Scheduler) cleanupOldEmailSends(ctx context.Context) {
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.Error("panic during email sends cleanup", "panic", r)
+		}
+	}()
+
+	deleted, err := s.store.CleanupOldSends(emailSendsRetention)
+	if err != nil {
+		s.logger.Error("failed to cleanup old email sends", "err", err)
+		return
+	}
+	if deleted > 0 {
+		s.logger.Info("cleaned up old email sends", "deleted", deleted)
+	}
+}
+
+func (s *Scheduler) checkAndDeactivateInactiveConfigs(ctx context.Context) {
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.Error("panic during inactive config check", "panic", r)
+		}
+	}()
+
+	inactiveConfigs, err := s.store.GetInactiveConfigs(inactivityThreshold, minSendsBeforeDeactivate)
+	if err != nil {
+		s.logger.Error("failed to get inactive configs", "err", err)
+		return
+	}
+
+	if len(inactiveConfigs) == 0 {
+		return
+	}
+
+	s.logger.Info("found inactive configs", "count", len(inactiveConfigs))
+
+	for _, configID := range inactiveConfigs {
+		cfg, err := s.store.GetConfigByID(ctx, configID)
+		if err != nil {
+			s.logger.Error("failed to get config", "config_id", configID, "err", err)
+			continue
+		}
+
+		// Only deactivate if next_run is set (config is active)
+		if !cfg.NextRun.Valid {
+			continue
+		}
+
+		// Deactivate by setting next_run to NULL
+		if err := s.store.UpdateNextRun(ctx, configID, nil); err != nil {
+			s.logger.Error("failed to deactivate inactive config", "config_id", configID, "err", err)
+			continue
+		}
+
+		s.logger.Info("deactivated inactive config", "config_id", configID, "email", cfg.Email)
+		_ = s.store.AddLog(ctx, configID, "info", fmt.Sprintf("Auto-deactivated due to no email opens in %d days", inactivityThreshold))
 	}
 }
 
@@ -289,7 +361,15 @@ func (s *Scheduler) sendDigestAndMarkSeen(ctx context.Context, cfg *store.Config
 
 	// Send email - if this fails, transaction will rollback
 	subject := "feed digest"
-	if err := s.mailer.Send(cfg.Email, subject, htmlBody, textBody, unsubToken, dashboardURL); err != nil {
+	
+	// Record email send with tracking
+	trackingToken, err := s.store.RecordEmailSend(cfg.ID, cfg.Email, subject, true)
+	if err != nil {
+		s.logger.Warn("failed to record email send", "err", err)
+		trackingToken = ""
+	}
+	
+	if err := s.mailer.Send(cfg.Email, subject, htmlBody, textBody, unsubToken, dashboardURL, trackingToken); err != nil {
 		return fmt.Errorf("send email: %w", err)
 	}
 

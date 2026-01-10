@@ -69,12 +69,16 @@ type userPageData struct {
 }
 
 type configInfo struct {
-	Filename    string
-	FeedCount   int
-	URL         string
-	FeedXMLURL  string
-	FeedJSONURL string
-	IsActive    bool
+	Filename      string
+	FeedCount     int
+	URL           string
+	FeedXMLURL    string
+	FeedJSONURL   string
+	IsActive      bool
+	TotalSends    int
+	Opens         int
+	OpenRate      float64
+	LastOpenDays  int
 }
 
 func (s *Server) handleUser(w http.ResponseWriter, r *http.Request, fingerprint string) {
@@ -125,13 +129,34 @@ func (s *Server) handleUser(w http.ResponseWriter, r *http.Request, fingerprint 
 		// Generate feed URLs - trim .txt extension for cleaner URLs
 		feedBaseName := strings.TrimSuffix(cfg.Filename, ".txt")
 
+		// Get engagement stats (last 90 days)
+		totalSends, opens, _, lastOpen, err := s.store.GetConfigEngagement(cfg.ID, 90)
+		if err != nil {
+			s.logger.Warn("get engagement", "config_id", cfg.ID, "err", err)
+			// Continue without engagement data
+		}
+
+		openRate := 0.0
+		if totalSends > 0 {
+			openRate = float64(opens) / float64(totalSends) * 100
+		}
+
+		lastOpenDays := -1
+		if lastOpen != nil {
+			lastOpenDays = int(time.Since(*lastOpen).Hours() / 24)
+		}
+
 		configInfos = append(configInfos, configInfo{
-			Filename:    cfg.Filename,
-			FeedCount:   len(feeds),
-			URL:         "/" + fingerprint + "/" + cfg.Filename,
-			FeedXMLURL:  "/" + fingerprint + "/" + feedBaseName + ".xml",
-			FeedJSONURL: "/" + fingerprint + "/" + feedBaseName + ".json",
-			IsActive:    isActive,
+			Filename:     cfg.Filename,
+			FeedCount:    len(feeds),
+			URL:          "/" + fingerprint + "/" + cfg.Filename,
+			FeedXMLURL:   "/" + fingerprint + "/" + feedBaseName + ".xml",
+			FeedJSONURL:  "/" + fingerprint + "/" + feedBaseName + ".json",
+			IsActive:     isActive,
+			TotalSends:   totalSends,
+			Opens:        opens,
+			OpenRate:     openRate,
+			LastOpenDays: lastOpenDays,
 		})
 
 		if cfg.NextRun.Valid {
@@ -642,6 +667,37 @@ func parseOriginHost(origin string) string {
 	}
 
 	return hostPort
+}
+
+func (s *Server) handleTrackingPixel(w http.ResponseWriter, r *http.Request, token string) {
+	// Only allow GET requests
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Mark email as opened
+	if err := s.store.MarkEmailOpened(token); err != nil {
+		// Log but still return pixel (don't leak token validity)
+		s.logger.Debug("tracking pixel error", "token", token, "err", err)
+	}
+
+	// Return 1x1 transparent GIF
+	w.Header().Set("Content-Type", "image/gif")
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Expires", "0")
+	
+	// 1x1 transparent GIF (base64 decoded: R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7)
+	gifBytes := []byte{
+		0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x01, 0x00,
+		0x01, 0x00, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0xFF, 0xFF, 0xFF, 0x21, 0xF9, 0x04, 0x01, 0x00,
+		0x00, 0x00, 0x00, 0x2C, 0x00, 0x00, 0x00, 0x00,
+		0x01, 0x00, 0x01, 0x00, 0x00, 0x02, 0x02, 0x44,
+		0x01, 0x00, 0x3B,
+	}
+	w.Write(gifBytes)
 }
 
 func (s *Server) handle404(w http.ResponseWriter, r *http.Request) {
