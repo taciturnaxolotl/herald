@@ -129,12 +129,17 @@ func handleRun(ctx context.Context, sess ssh.Session, user *store.User, st *stor
 
 	fmt.Fprintln(sess, "Running "+filename+"...")
 
-	if err := sched.RunNow(ctx, cfg.ID); err != nil {
+	newItems, err := sched.RunNow(ctx, cfg.ID)
+	if err != nil {
 		fmt.Fprintln(sess, errorStyle.Render("Error: "+err.Error()))
 		return
 	}
 
-	fmt.Fprintln(sess, successStyle.Render("Done! Check your email."))
+	if newItems == 0 {
+		fmt.Fprintln(sess, dimStyle.Render("No new items found."))
+	} else {
+		fmt.Fprintln(sess, successStyle.Render(fmt.Sprintf("Sent %d new item(s) to %s", newItems, cfg.Email)))
+	}
 }
 
 func handleLogs(ctx context.Context, sess ssh.Session, user *store.User, st *store.DB) {
