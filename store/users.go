@@ -56,3 +56,20 @@ func (db *DB) GetUserByFingerprint(ctx context.Context, fp string) (*User, error
 	}
 	return &user, nil
 }
+
+func (db *DB) GetUserByID(ctx context.Context, userID int64) (*User, error) {
+	var user User
+	err := db.QueryRowContext(ctx,
+		`SELECT id, pubkey_fp, pubkey, created_at FROM users WHERE id = ?`,
+		userID,
+	).Scan(&user.ID, &user.PubkeyFP, &user.Pubkey, &user.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return &user, nil
+}
+
+func (db *DB) DeleteUser(ctx context.Context, userID int64) error {
+	_, err := db.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, userID)
+	return err
+}

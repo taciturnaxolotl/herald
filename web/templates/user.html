@@ -10,20 +10,19 @@
 <body>
 <h1>HERALD</h1>
 <p><strong>USER:</strong> {{.ShortFingerprint}}</p>
-<p><strong>STATUS:</strong> ONLINE</p>
+<p><strong>STATUS:</strong> {{.Status}}</p>
 <p><strong>NEXT RUN:</strong> {{.NextRun}}</p>
 <h2>CONFIGS</h2>
 <ul>
 {{range .Configs}}
-    <li><a href="{{.URL}}">{{.Filename}}</a> ({{.FeedCount}} feeds)</li>
+    <li{{if not .IsActive}} class="inactive"{{end}}>
+        <a href="{{.URL}}">{{.Filename}}</a> ({{.FeedCount}} feeds)
+        - <a href="{{.FeedXMLURL}}">RSS</a>
+        - <a href="{{.FeedJSONURL}}">JSON</a>
+    </li>
 {{else}}
     <li>No configs uploaded</li>
 {{end}}
-</ul>
-<h2>FEEDS</h2>
-<ul>
-    <li><a href="{{.FeedXMLURL}}">RSS 2.0</a></li>
-    <li><a href="{{.FeedJSONURL}}">JSON Feed</a></li>
 </ul>
 </body>
 </html>

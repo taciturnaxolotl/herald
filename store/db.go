@@ -82,12 +82,20 @@ func (db *DB) migrate() error {
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 
+	CREATE TABLE IF NOT EXISTS unsubscribe_tokens (
+		id INTEGER PRIMARY KEY,
+		token TEXT UNIQUE NOT NULL,
+		config_id INTEGER NOT NULL REFERENCES configs(id) ON DELETE CASCADE,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+
 	CREATE INDEX IF NOT EXISTS idx_configs_user_id ON configs(user_id);
 	CREATE INDEX IF NOT EXISTS idx_configs_next_run ON configs(next_run);
 	CREATE INDEX IF NOT EXISTS idx_feeds_config_id ON feeds(config_id);
 	CREATE INDEX IF NOT EXISTS idx_seen_items_feed_id ON seen_items(feed_id);
 	CREATE INDEX IF NOT EXISTS idx_logs_config_id ON logs(config_id);
 	CREATE INDEX IF NOT EXISTS idx_logs_created_at ON logs(created_at);
+	CREATE INDEX IF NOT EXISTS idx_unsubscribe_tokens_token ON unsubscribe_tokens(token);
 	`
 
 	_, err := db.Exec(schema)

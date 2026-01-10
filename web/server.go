@@ -69,19 +69,31 @@ func (s *Server) routeHandler(w http.ResponseWriter, r *http.Request) {
 
 	parts := strings.Split(path, "/")
 
+	if len(parts) == 2 && parts[0] == "unsubscribe" {
+		s.handleUnsubscribe(w, r, parts[1])
+		return
+	}
+
 	switch len(parts) {
 	case 1:
 		s.handleUser(w, r, parts[0])
 	case 2:
-		switch parts[1] {
-		case "feed.xml":
-			s.handleFeedXML(w, r, parts[0])
-		case "feed.json":
-			s.handleFeedJSON(w, r, parts[0])
-		default:
+		// Check if it's a feed file (ends with .xml or .json)
+		if strings.HasSuffix(parts[1], ".xml") {
+			// Extract base name by removing .xml extension, then append .txt to find config
+			baseName := strings.TrimSuffix(parts[1], ".xml")
+			configFile := baseName + ".txt"
+			s.handleFeedXML(w, r, parts[0], configFile)
+		} else if strings.HasSuffix(parts[1], ".json") {
+			// Extract base name by removing .json extension, then append .txt to find config
+			baseName := strings.TrimSuffix(parts[1], ".json")
+			configFile := baseName + ".txt"
+			s.handleFeedJSON(w, r, parts[0], configFile)
+		} else {
+			// Raw config file
 			s.handleConfig(w, r, parts[0], parts[1])
 		}
 	default:
-		http.NotFound(w, r)
+		s.handle404(w, r)
 	}
 }

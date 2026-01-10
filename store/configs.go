@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"fmt"
 	"time"
+
+	"github.com/adhocore/gronx"
 )
 
 type Config struct {
@@ -148,4 +150,45 @@ func (db *DB) GetDueConfigs(ctx context.Context, now time.Time) ([]*Config, erro
 		configs = append(configs, &cfg)
 	}
 	return configs, rows.Err()
+}
+
+func (db *DB) DeactivateConfig(ctx context.Context, configID int64) error {
+	_, err := db.ExecContext(ctx,
+		`UPDATE configs SET next_run = NULL WHERE id = ?`,
+		configID,
+	)
+	if err != nil {
+		return fmt.Errorf("deactivate config: %w", err)
+	}
+	return nil
+}
+
+func (db *DB) DeactivateConfigByFilename(ctx context.Context, userID int64, filename string) error {
+	cfg, err := db.GetConfig(ctx, userID, filename)
+	if err != nil {
+		return err
+	}
+	return db.DeactivateConfig(ctx, cfg.ID)
+}
+
+func (db *DB) ActivateConfig(ctx context.Context, userID int64, filename string) error {
+	cfg, err := db.GetConfig(ctx, userID, filename)
+	if err != nil {
+		return err
+	}
+
+	nextRun, err := gronx.NextTick(cfg.CronExpr, false)
+	if err != nil {
+		return fmt.Errorf("calculate next run: %w", err)
+	}
+
+	_, err = db.ExecContext(ctx,
+		`UPDATE configs SET next_run = ? WHERE id = ?`,
+		nextRun,
+		cfg.ID,
+	)
+	if err != nil {
+		return fmt.Errorf("activate config: %w", err)
+	}
+	return nil
 }

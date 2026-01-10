@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"errors"
+	"fmt"
 	"net/http"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -43,16 +45,18 @@ type userPageData struct {
 	Fingerprint      string
 	ShortFingerprint string
 	Configs          []configInfo
+	Status           string
 	NextRun          string
-	FeedXMLURL       string
-	FeedJSONURL      string
 	Origin           string
 }
 
 type configInfo struct {
-	Filename  string
-	FeedCount int
-	URL       string
+	Filename    string
+	FeedCount   int
+	URL         string
+	FeedXMLURL  string
+	FeedJSONURL string
+	IsActive    bool
 }
 
 func (s *Server) handleUser(w http.ResponseWriter, r *http.Request, fingerprint string) {
@@ -61,7 +65,7 @@ func (s *Server) handleUser(w http.ResponseWriter, r *http.Request, fingerprint 
 	user, err := s.store.GetUserByFingerprint(ctx, fingerprint)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			http.Error(w, "User Not Found", http.StatusNotFound)
+			s.handle404(w, r)
 			return
 		}
 		s.logger.Error("get user", "err", err)
@@ -78,6 +82,7 @@ func (s *Server) handleUser(w http.ResponseWriter, r *http.Request, fingerprint 
 
 	var configInfos []configInfo
 	var earliestNextRun time.Time
+	hasAnyActive := false
 
 	for _, cfg := range configs {
 		feeds, err := s.store.GetFeedsByConfig(ctx, cfg.ID)
@@ -86,10 +91,21 @@ func (s *Server) handleUser(w http.ResponseWriter, r *http.Request, fingerprint 
 			continue
 		}
 
+		isActive := cfg.NextRun.Valid
+		if isActive {
+			hasAnyActive = true
+		}
+
+		// Generate feed URLs - trim .txt extension for cleaner URLs
+		feedBaseName := strings.TrimSuffix(cfg.Filename, ".txt")
+
 		configInfos = append(configInfos, configInfo{
-			Filename:  cfg.Filename,
-			FeedCount: len(feeds),
-			URL:       "/" + fingerprint + "/" + cfg.Filename,
+			Filename:    cfg.Filename,
+			FeedCount:   len(feeds),
+			URL:         "/" + fingerprint + "/" + cfg.Filename,
+			FeedXMLURL:  "/" + fingerprint + "/" + feedBaseName + ".xml",
+			FeedJSONURL: "/" + fingerprint + "/" + feedBaseName + ".json",
+			IsActive:    isActive,
 		})
 
 		if cfg.NextRun.Valid {
@@ -100,8 +116,12 @@ func (s *Server) handleUser(w http.ResponseWriter, r *http.Request, fingerprint 
 	}
 
 	nextRunStr := "—"
-	if !earliestNextRun.IsZero() {
-		nextRunStr = earliestNextRun.Format("2006-01-02 15:04 MST")
+	status := "INACTIVE"
+	if hasAnyActive {
+		if !earliestNextRun.IsZero() {
+			nextRunStr = earliestNextRun.Format("2006-01-02 15:04 MST")
+		}
+		status = "ACTIVE"
 	}
 
 	shortFP := fingerprint
@@ -113,9 +133,8 @@ func (s *Server) handleUser(w http.ResponseWriter, r *http.Request, fingerprint 
 		Fingerprint:      fingerprint,
 		ShortFingerprint: shortFP,
 		Configs:          configInfos,
+		Status:           status,
 		NextRun:          nextRunStr,
-		FeedXMLURL:       "/" + fingerprint + "/feed.xml",
-		FeedJSONURL:      "/" + fingerprint + "/feed.json",
 		Origin:           s.origin,
 	}
 
@@ -145,13 +164,13 @@ type rssFeed struct {
 	Channel rssChannel `xml:"channel"`
 }
 
-func (s *Server) handleFeedXML(w http.ResponseWriter, r *http.Request, fingerprint string) {
+func (s *Server) handleFeedXML(w http.ResponseWriter, r *http.Request, fingerprint, configFilename string) {
 	ctx := r.Context()
 
 	user, err := s.store.GetUserByFingerprint(ctx, fingerprint)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			http.Error(w, "User Not Found", http.StatusNotFound)
+			s.handle404(w, r)
 			return
 		}
 		s.logger.Error("get user", "err", err)
@@ -159,37 +178,42 @@ func (s *Server) handleFeedXML(w http.ResponseWriter, r *http.Request, fingerpri
 		return
 	}
 
-	configs, err := s.store.ListConfigs(ctx, user.ID)
+	cfg, err := s.store.GetConfig(ctx, user.ID, configFilename)
 	if err != nil {
-		s.logger.Error("list configs", "err", err)
+		if errors.Is(err, sql.ErrNoRows) {
+			s.handle404(w, r)
+			return
+		}
+		s.logger.Error("get config", "err", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
 
 	var items []rssItem
-	for _, cfg := range configs {
-		feeds, err := s.store.GetFeedsByConfig(ctx, cfg.ID)
+	feeds, err := s.store.GetFeedsByConfig(ctx, cfg.ID)
+	if err != nil {
+		s.logger.Error("get feeds", "err", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+	
+	for _, feed := range feeds {
+		seenItems, err := s.store.GetSeenItems(ctx, feed.ID, 50)
 		if err != nil {
 			continue
 		}
-		for _, feed := range feeds {
-			seenItems, err := s.store.GetSeenItems(ctx, feed.ID, 50)
-			if err != nil {
-				continue
+		for _, item := range seenItems {
+			rItem := rssItem{
+				GUID:    item.GUID,
+				PubDate: item.SeenAt.Format(time.RFC1123Z),
 			}
-			for _, item := range seenItems {
-				rItem := rssItem{
-					GUID:    item.GUID,
-					PubDate: item.SeenAt.Format(time.RFC1123Z),
-				}
-				if item.Title.Valid {
-					rItem.Title = item.Title.String
-				}
-				if item.Link.Valid {
-					rItem.Link = item.Link.String
-				}
-				items = append(items, rItem)
+			if item.Title.Valid {
+				rItem.Title = item.Title.String
 			}
+			if item.Link.Valid {
+				rItem.Link = item.Link.String
+			}
+			items = append(items, rItem)
 		}
 	}
 
@@ -206,9 +230,9 @@ func (s *Server) handleFeedXML(w http.ResponseWriter, r *http.Request, fingerpri
 	feed := rssFeed{
 		Version: "2.0",
 		Channel: rssChannel{
-			Title:       "Herald - " + fingerprint[:12],
-			Link:        s.origin + "/" + fingerprint,
-			Description: "Aggregated feed for " + fingerprint[:12],
+			Title:       "Herald - " + configFilename,
+			Link:        s.origin + "/" + fingerprint + "/" + configFilename,
+			Description: "Feed for " + configFilename,
 			Items:       items,
 		},
 	}
@@ -235,13 +259,13 @@ type jsonFeedItem struct {
 	DatePublished string `json:"date_published"`
 }
 
-func (s *Server) handleFeedJSON(w http.ResponseWriter, r *http.Request, fingerprint string) {
+func (s *Server) handleFeedJSON(w http.ResponseWriter, r *http.Request, fingerprint, configFilename string) {
 	ctx := r.Context()
 
 	user, err := s.store.GetUserByFingerprint(ctx, fingerprint)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			http.Error(w, "User Not Found", http.StatusNotFound)
+			s.handle404(w, r)
 			return
 		}
 		s.logger.Error("get user", "err", err)
@@ -249,37 +273,42 @@ func (s *Server) handleFeedJSON(w http.ResponseWriter, r *http.Request, fingerpr
 		return
 	}
 
-	configs, err := s.store.ListConfigs(ctx, user.ID)
+	cfg, err := s.store.GetConfig(ctx, user.ID, configFilename)
 	if err != nil {
-		s.logger.Error("list configs", "err", err)
+		if errors.Is(err, sql.ErrNoRows) {
+			s.handle404(w, r)
+			return
+		}
+		s.logger.Error("get config", "err", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
 
 	var items []jsonFeedItem
-	for _, cfg := range configs {
-		feeds, err := s.store.GetFeedsByConfig(ctx, cfg.ID)
+	feeds, err := s.store.GetFeedsByConfig(ctx, cfg.ID)
+	if err != nil {
+		s.logger.Error("get feeds", "err", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+	
+	for _, feed := range feeds {
+		seenItems, err := s.store.GetSeenItems(ctx, feed.ID, 50)
 		if err != nil {
 			continue
 		}
-		for _, feed := range feeds {
-			seenItems, err := s.store.GetSeenItems(ctx, feed.ID, 50)
-			if err != nil {
-				continue
+		for _, item := range seenItems {
+			jItem := jsonFeedItem{
+				ID:            item.GUID,
+				DatePublished: item.SeenAt.Format(time.RFC3339),
 			}
-			for _, item := range seenItems {
-				jItem := jsonFeedItem{
-					ID:            item.GUID,
-					DatePublished: item.SeenAt.Format(time.RFC3339),
-				}
-				if item.Title.Valid {
-					jItem.Title = item.Title.String
-				}
-				if item.Link.Valid {
-					jItem.URL = item.Link.String
-				}
-				items = append(items, jItem)
+			if item.Title.Valid {
+				jItem.Title = item.Title.String
 			}
+			if item.Link.Valid {
+				jItem.URL = item.Link.String
+			}
+			items = append(items, jItem)
 		}
 	}
 
@@ -295,9 +324,9 @@ func (s *Server) handleFeedJSON(w http.ResponseWriter, r *http.Request, fingerpr
 
 	feed := jsonFeed{
 		Version:     "https://jsonfeed.org/version/1.1",
-		Title:       "Herald - " + fingerprint[:12],
-		HomePageURL: s.origin + "/" + fingerprint,
-		FeedURL:     s.origin + "/" + fingerprint + "/feed.json",
+		Title:       "Herald - " + configFilename,
+		HomePageURL: s.origin + "/" + fingerprint + "/" + configFilename,
+		FeedURL:     s.origin + "/" + fingerprint + "/" + configFilename + ".json",
 		Items:       items,
 	}
 
@@ -313,7 +342,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request, fingerprin
 	user, err := s.store.GetUserByFingerprint(ctx, fingerprint)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			http.Error(w, "User Not Found", http.StatusNotFound)
+			s.handle404(w, r)
 			return
 		}
 		s.logger.Error("get user", "err", err)
@@ -324,7 +353,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request, fingerprin
 	cfg, err := s.store.GetConfig(ctx, user.ID, filename)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			http.Error(w, "Config Not Found", http.StatusNotFound)
+			s.handle404(w, r)
 			return
 		}
 		s.logger.Error("get config", "err", err)
@@ -334,6 +363,123 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request, fingerprin
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Write([]byte(cfg.RawText))
+}
+
+type unsubscribePageData struct {
+	Token            string
+	ShortFingerprint string
+	Filename         string
+	Success          bool
+	Message          string
+	Error            string
+}
+
+func (s *Server) handleUnsubscribeGET(w http.ResponseWriter, r *http.Request, token string) {
+	ctx := r.Context()
+
+	cfg, err := s.store.GetConfigByToken(ctx, token)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			s.handle404WithMessage(w, r, "Invalid Link", "This unsubscribe link is invalid or has expired.")
+			return
+		}
+		s.logger.Error("get config by token", "err", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	user, err := s.store.GetUserByID(ctx, cfg.UserID)
+	if err != nil {
+		s.logger.Error("get user", "err", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	shortFP := user.PubkeyFP
+	if len(shortFP) > 12 {
+		shortFP = shortFP[:12]
+	}
+
+	data := unsubscribePageData{
+		Token:            token,
+		ShortFingerprint: shortFP,
+		Filename:         cfg.Filename,
+	}
+
+	if err := s.tmpl.ExecuteTemplate(w, "unsubscribe.html", data); err != nil {
+		s.logger.Error("render unsubscribe", "err", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+	}
+}
+
+func (s *Server) handleUnsubscribePOST(w http.ResponseWriter, r *http.Request, token string) {
+	ctx := r.Context()
+
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Bad Request", http.StatusBadRequest)
+		return
+	}
+
+	action := r.FormValue("action")
+	if action != "deactivate" && action != "delete" {
+		http.Error(w, "Invalid action", http.StatusBadRequest)
+		return
+	}
+
+	cfg, err := s.store.GetConfigByToken(ctx, token)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			s.handle404WithMessage(w, r, "Invalid Link", "This unsubscribe link is invalid or has expired.")
+			return
+		}
+		s.logger.Error("get config by token", "err", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	var message string
+
+	if action == "deactivate" {
+		if err := s.store.DeactivateConfig(ctx, cfg.ID); err != nil {
+			s.logger.Error("deactivate config", "err", err)
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+		message = fmt.Sprintf("Config '%s' deactivated. You will no longer receive emails for this config. Other configs remain active. Files remain accessible via SSH/SCP.", cfg.Filename)
+		s.logger.Info("config deactivated", "config_id", cfg.ID, "filename", cfg.Filename)
+	} else {
+		if err := s.store.DeleteUser(ctx, cfg.UserID); err != nil {
+			s.logger.Error("delete user", "err", err)
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+		message = "All data deleted. You have been completely removed from Herald."
+		s.logger.Info("user deleted", "user_id", cfg.UserID)
+	}
+
+	if err := s.store.DeleteToken(ctx, token); err != nil {
+		s.logger.Error("delete token", "err", err)
+	}
+
+	data := unsubscribePageData{
+		Success: true,
+		Message: message,
+	}
+
+	if err := s.tmpl.ExecuteTemplate(w, "unsubscribe.html", data); err != nil {
+		s.logger.Error("render unsubscribe", "err", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+	}
+}
+
+func (s *Server) handleUnsubscribe(w http.ResponseWriter, r *http.Request, token string) {
+	if r.Method == http.MethodGet {
+		s.handleUnsubscribeGET(w, r, token)
+	} else if r.Method == http.MethodPost {
+		s.handleUnsubscribePOST(w, r, token)
+	} else {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+	}
 }
 
 func stripProtocol(origin string) string {
@@ -367,4 +513,31 @@ func parseOriginHost(origin string) string {
 	}
 	
 	return hostPort
+}
+
+func (s *Server) handle404(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotFound)
+	data := struct {
+		Title   string
+		Message string
+	}{}
+	if err := s.tmpl.ExecuteTemplate(w, "404.html", data); err != nil {
+		s.logger.Error("render 404", "err", err)
+		http.Error(w, "Not Found", http.StatusNotFound)
+	}
+}
+
+func (s *Server) handle404WithMessage(w http.ResponseWriter, r *http.Request, title, message string) {
+	w.WriteHeader(http.StatusNotFound)
+	data := struct {
+		Title   string
+		Message string
+	}{
+		Title:   title,
+		Message: message,
+	}
+	if err := s.tmpl.ExecuteTemplate(w, "404.html", data); err != nil {
+		s.logger.Error("render 404", "err", err)
+		http.Error(w, "Not Found", http.StatusNotFound)
+	}
 }

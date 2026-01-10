@@ -51,6 +51,18 @@ func HandleCommand(sess ssh.Session, user *store.User, st *store.DB, sched *sche
 			return
 		}
 		handleRm(ctx, sess, user, st, cmd[1])
+	case "activate":
+		if len(cmd) < 2 {
+			fmt.Fprintln(sess, errorStyle.Render("Usage: activate <filename>"))
+			return
+		}
+		handleActivate(ctx, sess, user, st, cmd[1])
+	case "deactivate":
+		if len(cmd) < 2 {
+			fmt.Fprintln(sess, errorStyle.Render("Usage: deactivate <filename>"))
+			return
+		}
+		handleDeactivate(ctx, sess, user, st, cmd[1])
 	case "run":
 		if len(cmd) < 2 {
 			fmt.Fprintln(sess, errorStyle.Render("Usage: run <filename>"))
@@ -61,7 +73,7 @@ func HandleCommand(sess ssh.Session, user *store.User, st *store.DB, sched *sche
 		handleLogs(ctx, sess, user, st)
 	default:
 		fmt.Fprintf(sess, errorStyle.Render("Unknown command: %s\n"), cmd[0])
-		fmt.Fprintln(sess, "Available commands: ls, cat, rm, run, logs")
+		fmt.Fprintln(sess, "Available commands: ls, cat, rm, activate, deactivate, run, logs")
 	}
 }
 
@@ -118,6 +130,26 @@ func handleRm(ctx context.Context, sess ssh.Session, user *store.User, st *store
 	}
 
 	fmt.Fprintln(sess, successStyle.Render("Deleted: "+filename))
+}
+
+func handleActivate(ctx context.Context, sess ssh.Session, user *store.User, st *store.DB, filename string) {
+	err := st.ActivateConfig(ctx, user.ID, filename)
+	if err != nil {
+		fmt.Fprintln(sess, errorStyle.Render("Error: "+err.Error()))
+		return
+	}
+
+	fmt.Fprintln(sess, successStyle.Render("Activated: "+filename))
+}
+
+func handleDeactivate(ctx context.Context, sess ssh.Session, user *store.User, st *store.DB, filename string) {
+	err := st.DeactivateConfigByFilename(ctx, user.ID, filename)
+	if err != nil {
+		fmt.Fprintln(sess, errorStyle.Render("Error: "+err.Error()))
+		return
+	}
+
+	fmt.Fprintln(sess, successStyle.Render("Deactivated: "+filename))
 }
 
 func handleRun(ctx context.Context, sess ssh.Session, user *store.User, st *store.DB, sched *scheduler.Scheduler, filename string) {

@@ -152,8 +152,14 @@ func (s *Scheduler) RunNow(ctx context.Context, configID int64) (int, error) {
 			return 0, fmt.Errorf("render digest: %w", err)
 		}
 
+		unsubToken, err := s.store.GetOrCreateUnsubscribeToken(ctx, cfg.ID)
+		if err != nil {
+			s.logger.Warn("failed to create unsubscribe token", "err", err)
+			unsubToken = ""
+		}
+
 		subject := "feed digest"
-		if err := s.mailer.Send(cfg.Email, subject, htmlBody, textBody); err != nil {
+		if err := s.mailer.Send(cfg.Email, subject, htmlBody, textBody, unsubToken); err != nil {
 			return 0, fmt.Errorf("send email: %w", err)
 		}
 
@@ -274,8 +280,14 @@ func (s *Scheduler) processConfig(ctx context.Context, cfg *store.Config) error 
 			return fmt.Errorf("render digest: %w", err)
 		}
 
+		unsubToken, err := s.store.GetOrCreateUnsubscribeToken(ctx, cfg.ID)
+		if err != nil {
+			s.logger.Warn("failed to create unsubscribe token", "err", err)
+			unsubToken = ""
+		}
+
 		subject := "feed digest"
-		if err := s.mailer.Send(cfg.Email, subject, htmlBody, textBody); err != nil {
+		if err := s.mailer.Send(cfg.Email, subject, htmlBody, textBody, unsubToken); err != nil {
 			return fmt.Errorf("send email: %w", err)
 		}
 

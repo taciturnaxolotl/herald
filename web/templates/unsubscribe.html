@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>HERALD - Unsubscribe</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎏</text></svg>">
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<h1>HERALD</h1>
+
+{{if .Success}}
+    <h2>SUCCESS</h2>
+    <p>{{.Message}}</p>
+    <p><a href="/">Return to home</a></p>
+{{else}}
+    <h2>UNSUBSCRIBE</h2>
+    <p><strong>USER:</strong> {{.ShortFingerprint}}</p>
+    <p><strong>CONFIG:</strong> {{.Filename}}</p>
+    
+    <h2>OPTIONS</h2>
+    <ul>
+        <li>
+            <form method="POST" style="display: inline;">
+                <input type="hidden" name="action" value="deactivate">
+                <a href="#" onclick="this.closest('form').submit(); return false;">Deactivate this config</a>
+            </form>
+            - Stop emails for {{.Filename}} only. Other configs remain active. Files remain accessible via SSH/SCP.
+        </li>
+        <li>
+            <form method="POST" style="display: inline;">
+                <input type="hidden" name="action" value="delete">
+                <a href="#" onclick="this.closest('form').submit(); return false;">Delete Forever</a>
+            </form>
+            - Permanently remove ALL configs and data for this user from Herald.
+        </li>
+    </ul>
+{{end}}
+
+</body>
+</html>

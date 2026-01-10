@@ -19,17 +19,32 @@ type SMTPConfig struct {
 }
 
 type Mailer struct {
-	cfg SMTPConfig
+	cfg          SMTPConfig
+	unsubBaseURL string
 }
 
-func NewMailer(cfg SMTPConfig) *Mailer {
-	return &Mailer{cfg: cfg}
+func NewMailer(cfg SMTPConfig, unsubBaseURL string) *Mailer {
+	return &Mailer{
+		cfg:          cfg,
+		unsubBaseURL: unsubBaseURL,
+	}
 }
 
-func (m *Mailer) Send(to, subject, htmlBody, textBody string) error {
+func (m *Mailer) Send(to, subject, htmlBody, textBody, unsubToken string) error {
 	addr := net.JoinHostPort(m.cfg.Host, fmt.Sprintf("%d", m.cfg.Port))
 
 	boundary := "==herald-boundary-a1b2c3d4e5f6=="
+
+	// Add unsubscribe footer if token provided
+	if unsubToken != "" {
+		unsubURL := m.unsubBaseURL + "/unsubscribe/" + unsubToken
+		
+		htmlFooter := fmt.Sprintf(`<hr><p style="font-size: 12px; color: #666;"><a href="%s">Unsubscribe</a></p>`, unsubURL)
+		htmlBody = htmlBody + htmlFooter
+		
+		textFooter := fmt.Sprintf("\n\n---\nUnsubscribe: %s\n", unsubURL)
+		textBody = textBody + textFooter
+	}
 
 	headers := make(map[string]string)
 	headers["From"] = m.cfg.From
@@ -37,6 +52,13 @@ func (m *Mailer) Send(to, subject, htmlBody, textBody string) error {
 	headers["Subject"] = mime.QEncoding.Encode("utf-8", subject)
 	headers["MIME-Version"] = "1.0"
 	headers["Content-Type"] = fmt.Sprintf("multipart/alternative; boundary=%q", boundary)
+
+	// Add RFC 8058 unsubscribe headers
+	if unsubToken != "" {
+		unsubURL := m.unsubBaseURL + "/unsubscribe/" + unsubToken
+		headers["List-Unsubscribe"] = fmt.Sprintf("<%s>", unsubURL)
+		headers["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
+	}
 
 	var msg strings.Builder
 	for k, v := range headers {

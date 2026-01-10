@@ -149,7 +149,7 @@ func runServer(ctx context.Context) error {
 		User: cfg.SMTP.User,
 		Pass: cfg.SMTP.Pass,
 		From: cfg.SMTP.From,
-	})
+	}, cfg.Origin)
 
 	sched := scheduler.NewScheduler(db, mailer, logger, 60*time.Second)
 
