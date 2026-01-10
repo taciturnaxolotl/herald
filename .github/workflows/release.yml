@@ -9,9 +9,43 @@ permissions:
   contents: write
 
 jobs:
-  goreleaser:
-    name: Release with GoReleaser
+  release:
+    name: Release
     runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create ${{ github.ref_name }} \
+            --title "Release ${{ github.ref_name }}" \
+            --generate-notes \
+            --draft
+
+  build:
+    name: Build ${{ matrix.goos }}-${{ matrix.goarch }}
+    needs: release
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            runner: ubuntu-latest
+          - goos: linux
+            goarch: arm64
+            runner: ubuntu-latest
+          - goos: darwin
+            goarch: amd64
+            runner: macos-13
+          - goos: darwin
+            goarch: arm64
+            runner: macos-latest
+    runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -25,15 +59,59 @@ jobs:
           cache: true
 
       - name: Install cross-compilation toolchain
+        if: matrix.goos == 'linux' && matrix.goarch == 'arm64'
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu
 
-      - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v6
-        with:
-          distribution: goreleaser
-          version: '~> v2'
-          args: release --clean
+      - name: Build
+        env:
+          CGO_ENABLED: 1
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CC: ${{ matrix.goos == 'linux' && matrix.goarch == 'arm64' && 'aarch64-linux-gnu-gcc' || '' }}
+        run: |
+          VERSION="${{ github.ref_name }}"
+          COMMIT_HASH="$(git rev-parse HEAD)"
+          BINARY_NAME="herald"
+          
+          go build \
+            -tags sqlite_foreign_keys \
+            -ldflags="-s -w -X main.version=${VERSION} -X main.commitHash=${COMMIT_HASH}" \
+            -o ${BINARY_NAME} \
+            .
+          
+          # Create archive
+          ARCHIVE_NAME="herald_$(echo ${{ matrix.goos }} | sed 's/.*/\u&/')_${{ matrix.goarch == 'amd64' && 'x86_64' || matrix.goarch }}"
+          
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            zip "${ARCHIVE_NAME}.zip" ${BINARY_NAME} LICENSE.md README.md config.example.yaml
+          else
+            tar czf "${ARCHIVE_NAME}.tar.gz" ${BINARY_NAME} LICENSE.md README.md config.example.yaml
+          fi
+
+      - name: Upload to Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ARCHIVE_NAME="herald_$(echo ${{ matrix.goos }} | sed 's/.*/\u&/')_${{ matrix.goarch == 'amd64' && 'x86_64' || matrix.goarch }}"
+          
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            gh release upload ${{ github.ref_name }} "${ARCHIVE_NAME}.zip"
+          else
+            gh release upload ${{ github.ref_name }} "${ARCHIVE_NAME}.tar.gz"
+          fi
+
+  finalize:
+    name: Finalize Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Publish Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release edit ${{ github.ref_name }} --draft=false
