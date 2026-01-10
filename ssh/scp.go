@@ -14,14 +14,16 @@ import (
 	"github.com/charmbracelet/ssh"
 	"github.com/charmbracelet/wish/scp"
 	"github.com/kierank/herald/config"
+	"github.com/kierank/herald/ratelimit"
 	"github.com/kierank/herald/scheduler"
 	"github.com/kierank/herald/store"
 )
 
 type scpHandler struct {
-	store     *store.DB
-	scheduler *scheduler.Scheduler
-	logger    *log.Logger
+	store       *store.DB
+	scheduler   *scheduler.Scheduler
+	logger      *log.Logger
+	rateLimiter *ratelimit.Limiter
 }
 
 func (h *scpHandler) Glob(s ssh.Session, pattern string) ([]string, error) {
@@ -106,12 +108,22 @@ func (h *scpHandler) Write(s ssh.Session, entry *scp.FileEntry) (int64, error) {
 		return 0, fmt.Errorf("no user in context")
 	}
 
+	// Rate limit SCP uploads (per user)
+	if !h.rateLimiter.Allow(fmt.Sprintf("scp:%d", user.ID)) {
+		return 0, fmt.Errorf("rate limit exceeded, please try again later")
+	}
+
+	// Max file size: 1MB
+	if entry.Size > 1024*1024 {
+		return 0, fmt.Errorf("file too large (max 1MB)")
+	}
+
 	name := entry.Name
 	if !strings.HasSuffix(name, ".txt") {
 		return 0, fmt.Errorf("only .txt files are supported")
 	}
 
-	content, err := io.ReadAll(entry.Reader)
+	content, err := io.ReadAll(io.LimitReader(entry.Reader, 1024*1024))
 	if err != nil {
 		return 0, fmt.Errorf("failed to read file: %w", err)
 	}

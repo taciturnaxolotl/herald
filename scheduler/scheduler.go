@@ -8,24 +8,27 @@ import (
 	"github.com/adhocore/gronx"
 	"github.com/charmbracelet/log"
 	"github.com/kierank/herald/email"
+	"github.com/kierank/herald/ratelimit"
 	"github.com/kierank/herald/store"
 )
 
 type Scheduler struct {
-	store      *store.DB
-	mailer     *email.Mailer
-	logger     *log.Logger
-	interval   time.Duration
-	originURL  string
+	store       *store.DB
+	mailer      *email.Mailer
+	logger      *log.Logger
+	interval    time.Duration
+	originURL   string
+	rateLimiter *ratelimit.Limiter
 }
 
 func NewScheduler(st *store.DB, mailer *email.Mailer, logger *log.Logger, interval time.Duration, originURL string) *Scheduler {
 	return &Scheduler{
-		store:     st,
-		mailer:    mailer,
-		logger:    logger,
-		interval:  interval,
-		originURL: originURL,
+		store:       st,
+		mailer:      mailer,
+		logger:      logger,
+		interval:    interval,
+		originURL:   originURL,
+		rateLimiter: ratelimit.New(1.0/60.0, 1), // 1 email per minute per user
 	}
 }
 
@@ -200,6 +203,11 @@ func (s *Scheduler) sendDigestAndMarkSeen(ctx context.Context, cfg *store.Config
 		dashboardURL = s.originURL + "/" + user.PubkeyFP
 	} else {
 		s.logger.Warn("failed to get user for dashboard URL", "err", err)
+	}
+
+	// Rate limit email sending per user
+	if !s.rateLimiter.Allow(fmt.Sprintf("email:%d", cfg.UserID)) {
+		return fmt.Errorf("rate limit exceeded for email sending")
 	}
 
 	// Begin transaction to mark items seen

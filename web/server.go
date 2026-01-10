@@ -4,10 +4,12 @@ import (
 	"context"
 	"embed"
 	"html/template"
+	"net"
 	"net/http"
 	"strings"
 
 	"github.com/charmbracelet/log"
+	"github.com/kierank/herald/ratelimit"
 	"github.com/kierank/herald/store"
 )
 
@@ -15,25 +17,27 @@ import (
 var templatesFS embed.FS
 
 type Server struct {
-	store      *store.DB
-	addr       string
-	origin     string
-	sshPort    int
-	logger     *log.Logger
-	tmpl       *template.Template
-	commitHash string
+	store       *store.DB
+	addr        string
+	origin      string
+	sshPort     int
+	logger      *log.Logger
+	tmpl        *template.Template
+	commitHash  string
+	rateLimiter *ratelimit.Limiter
 }
 
 func NewServer(st *store.DB, addr string, origin string, sshPort int, logger *log.Logger, commitHash string) *Server {
 	tmpl := template.Must(template.ParseFS(templatesFS, "templates/*.html"))
 	return &Server{
-		store:      st,
-		addr:       addr,
-		origin:     origin,
-		sshPort:    sshPort,
-		logger:     logger,
-		tmpl:       tmpl,
-		commitHash: commitHash,
+		store:       st,
+		addr:        addr,
+		origin:      origin,
+		sshPort:     sshPort,
+		logger:      logger,
+		tmpl:        tmpl,
+		commitHash:  commitHash,
+		rateLimiter: ratelimit.New(10, 20), // 10 req/sec, burst of 20
 	}
 }
 
@@ -45,7 +49,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 
 	srv := &http.Server{
 		Addr:    s.addr,
-		Handler: mux,
+		Handler: s.rateLimitMiddleware(mux),
 	}
 
 	go func() {
@@ -59,6 +63,23 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 		return nil
 	}
 	return err
+}
+
+func (s *Server) rateLimitMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ip, _, err := net.SplitHostPort(r.RemoteAddr)
+		if err != nil {
+			ip = r.RemoteAddr
+		}
+
+		if !s.rateLimiter.Allow(ip) {
+			s.logger.Warn("rate limit exceeded", "ip", ip, "path", r.URL.Path)
+			http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (s *Server) routeHandler(w http.ResponseWriter, r *http.Request) {

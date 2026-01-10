@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/ssh"
 	"github.com/charmbracelet/wish"
 	"github.com/charmbracelet/wish/scp"
+	"github.com/kierank/herald/ratelimit"
 	"github.com/kierank/herald/scheduler"
 	"github.com/kierank/herald/store"
 	gossh "golang.org/x/crypto/ssh"
@@ -28,18 +29,20 @@ type Config struct {
 }
 
 type Server struct {
-	cfg       Config
-	store     *store.DB
-	scheduler *scheduler.Scheduler
-	logger    *log.Logger
+	cfg         Config
+	store       *store.DB
+	scheduler   *scheduler.Scheduler
+	logger      *log.Logger
+	rateLimiter *ratelimit.Limiter
 }
 
 func NewServer(cfg Config, st *store.DB, sched *scheduler.Scheduler, logger *log.Logger) *Server {
 	return &Server{
-		cfg:       cfg,
-		store:     st,
-		scheduler: sched,
-		logger:    logger,
+		cfg:         cfg,
+		store:       st,
+		scheduler:   sched,
+		logger:      logger,
+		rateLimiter: ratelimit.New(5, 10), // 5 req/sec, burst of 10 for SSH/SCP
 	}
 }
 
@@ -49,9 +52,10 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	}
 
 	handler := &scpHandler{
-		store:     s.store,
-		scheduler: s.scheduler,
-		logger:    s.logger,
+		store:       s.store,
+		scheduler:   s.scheduler,
+		logger:      s.logger,
+		rateLimiter: s.rateLimiter,
 	}
 
 	srv, err := wish.NewServer(
@@ -95,6 +99,12 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 func (s *Server) publicKeyHandler(ctx ssh.Context, key ssh.PublicKey) bool {
 	fp := gossh.FingerprintSHA256(key)
 	pubkeyStr := string(gossh.MarshalAuthorizedKey(key))
+
+	// Rate limit authentication attempts by fingerprint
+	if !s.rateLimiter.Allow(fmt.Sprintf("auth:%s", fp)) {
+		s.logger.Warn("rate limit exceeded for auth", "fingerprint", fp)
+		return false
+	}
 
 	if !s.cfg.AllowAllKeys {
 		allowed := false
