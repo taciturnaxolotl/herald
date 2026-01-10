@@ -13,10 +13,14 @@ type DB struct {
 }
 
 func Open(path string) (*DB, error) {
-	db, err := sql.Open("sqlite3", path+"?_foreign_keys=on")
+	db, err := sql.Open("sqlite3", path+"?_foreign_keys=on&_journal_mode=WAL&_busy_timeout=5000")
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
+
+	// SQLite works best with single writer for WAL mode
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
 
 	if err := db.Ping(); err != nil {
 		return nil, fmt.Errorf("ping database: %w", err)
@@ -90,7 +94,7 @@ func (db *DB) migrate() error {
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_configs_user_id ON configs(user_id);
-	CREATE INDEX IF NOT EXISTS idx_configs_next_run ON configs(next_run);
+	CREATE INDEX IF NOT EXISTS idx_configs_active_next_run ON configs(next_run) WHERE next_run IS NOT NULL;
 	CREATE INDEX IF NOT EXISTS idx_feeds_config_id ON feeds(config_id);
 	CREATE INDEX IF NOT EXISTS idx_seen_items_feed_id ON seen_items(feed_id);
 	CREATE INDEX IF NOT EXISTS idx_logs_config_id ON logs(config_id);

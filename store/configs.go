@@ -52,6 +52,54 @@ func (db *DB) CreateConfig(ctx context.Context, userID int64, filename, email, c
 	}, nil
 }
 
+func (db *DB) CreateConfigTx(ctx context.Context, tx *sql.Tx, userID int64, filename, email, cronExpr string, digest, inline bool, rawText string, nextRun time.Time) (*Config, error) {
+	result, err := tx.ExecContext(ctx,
+		`INSERT INTO configs (user_id, filename, email, cron_expr, digest, inline_content, raw_text, next_run)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		userID, filename, email, cronExpr, digest, inline, rawText, nextRun,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("insert config: %w", err)
+	}
+
+	id, err := result.LastInsertId()
+	if err != nil {
+		return nil, fmt.Errorf("get last insert id: %w", err)
+	}
+
+	return &Config{
+		ID:            id,
+		UserID:        userID,
+		Filename:      filename,
+		Email:         email,
+		CronExpr:      cronExpr,
+		Digest:        digest,
+		InlineContent: inline,
+		RawText:       rawText,
+		NextRun:       sql.NullTime{Time: nextRun, Valid: true},
+		CreatedAt:     time.Now(),
+	}, nil
+}
+
+func (db *DB) DeleteConfigTx(ctx context.Context, tx *sql.Tx, userID int64, filename string) error {
+	result, err := tx.ExecContext(ctx,
+		`DELETE FROM configs WHERE user_id = ? AND filename = ?`,
+		userID, filename,
+	)
+	if err != nil {
+		return fmt.Errorf("delete config: %w", err)
+	}
+
+	n, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("rows affected: %w", err)
+	}
+	if n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
 func (db *DB) GetConfig(ctx context.Context, userID int64, filename string) (*Config, error) {
 	var cfg Config
 	err := db.QueryRowContext(ctx,

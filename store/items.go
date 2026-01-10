@@ -52,6 +52,26 @@ func (db *DB) IsItemSeen(ctx context.Context, feedID int64, guid string) (bool, 
 	return true, nil
 }
 
+func (db *DB) MarkItemSeenTx(ctx context.Context, tx *sql.Tx, feedID int64, guid, title, link string) error {
+	var titleVal, linkVal sql.NullString
+	if title != "" {
+		titleVal = sql.NullString{String: title, Valid: true}
+	}
+	if link != "" {
+		linkVal = sql.NullString{String: link, Valid: true}
+	}
+
+	_, err := tx.ExecContext(ctx,
+		`INSERT INTO seen_items (feed_id, guid, title, link) VALUES (?, ?, ?, ?)
+		 ON CONFLICT(feed_id, guid) DO UPDATE SET title = excluded.title, link = excluded.link`,
+		feedID, guid, titleVal, linkVal,
+	)
+	if err != nil {
+		return fmt.Errorf("mark item seen: %w", err)
+	}
+	return nil
+}
+
 func (db *DB) GetSeenItems(ctx context.Context, feedID int64, limit int) ([]*SeenItem, error) {
 	rows, err := db.QueryContext(ctx,
 		`SELECT id, feed_id, guid, title, link, seen_at

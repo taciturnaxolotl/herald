@@ -44,6 +44,33 @@ func (db *DB) CreateFeed(ctx context.Context, configID int64, url, name string) 
 	}, nil
 }
 
+func (db *DB) CreateFeedTx(ctx context.Context, tx *sql.Tx, configID int64, url, name string) (*Feed, error) {
+	var nameVal sql.NullString
+	if name != "" {
+		nameVal = sql.NullString{String: name, Valid: true}
+	}
+
+	result, err := tx.ExecContext(ctx,
+		`INSERT INTO feeds (config_id, url, name) VALUES (?, ?, ?)`,
+		configID, url, nameVal,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("insert feed: %w", err)
+	}
+
+	id, err := result.LastInsertId()
+	if err != nil {
+		return nil, fmt.Errorf("get last insert id: %w", err)
+	}
+
+	return &Feed{
+		ID:       id,
+		ConfigID: configID,
+		URL:      url,
+		Name:     nameVal,
+	}, nil
+}
+
 func (db *DB) GetFeedsByConfig(ctx context.Context, configID int64) ([]*Feed, error) {
 	rows, err := db.QueryContext(ctx,
 		`SELECT id, config_id, url, name, last_fetched, etag, last_modified

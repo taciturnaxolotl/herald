@@ -79,6 +79,43 @@ func (s *Scheduler) RunNow(ctx context.Context, configID int64) (int, error) {
 
 	results := FetchFeeds(ctx, feeds)
 
+	feedGroups, totalNew, err := s.collectNewItems(ctx, results)
+	if err != nil {
+		return 0, err
+	}
+
+	if totalNew > 0 {
+		if err := s.sendDigestAndMarkSeen(ctx, cfg, feedGroups, totalNew, results); err != nil {
+			return 0, err
+		}
+		s.logger.Info("email sent", "to", cfg.Email, "items", totalNew)
+	}
+
+	// Update feed metadata
+	for _, result := range results {
+		if result.ETag != "" || result.LastModified != "" {
+			if err := s.store.UpdateFeedFetched(ctx, result.FeedID, result.ETag, result.LastModified); err != nil {
+				s.logger.Warn("failed to update feed fetched", "err", err)
+			}
+		}
+	}
+
+	now := time.Now()
+	nextRun, err := gronx.NextTick(cfg.CronExpr, false)
+	if err != nil {
+		return totalNew, fmt.Errorf("calculate next run: %w", err)
+	}
+
+	if err := s.store.UpdateLastRun(ctx, cfg.ID, now, nextRun); err != nil {
+		return totalNew, fmt.Errorf("update last run: %w", err)
+	}
+
+	_ = s.store.AddLog(ctx, cfg.ID, "info", fmt.Sprintf("Processed: %d new items, next run: %s", totalNew, nextRun.Format(time.RFC3339)))
+
+	return totalNew, nil
+}
+
+func (s *Scheduler) collectNewItems(ctx context.Context, results []*FetchResult) ([]email.FeedGroup, int, error) {
 	var feedGroups []email.FeedGroup
 	totalNew := 0
 	threeMonthsAgo := time.Now().AddDate(0, -3, 0)
@@ -125,82 +162,77 @@ func (s *Scheduler) RunNow(ctx context.Context, configID int64) (int, error) {
 			})
 			totalNew += len(newItems)
 		}
-
-		if result.ETag != "" || result.LastModified != "" {
-			if err := s.store.UpdateFeedFetched(ctx, result.FeedID, result.ETag, result.LastModified); err != nil {
-				s.logger.Warn("failed to update feed fetched", "err", err)
-			}
-		}
 	}
 
 	if feedErrors == len(results) {
-		return 0, fmt.Errorf("all feeds failed to fetch")
+		return nil, 0, fmt.Errorf("all feeds failed to fetch")
 	}
 
-	if totalNew > 0 {
-		digestData := &email.DigestData{
-			ConfigName: cfg.Filename,
-			TotalItems: totalNew,
-			FeedGroups: feedGroups,
-		}
+	return feedGroups, totalNew, nil
+}
 
-		inline := cfg.InlineContent
-		if totalNew > 5 {
-			inline = false
-		}
-
-		htmlBody, textBody, err := email.RenderDigest(digestData, inline)
-		if err != nil {
-			return 0, fmt.Errorf("render digest: %w", err)
-		}
-
-		unsubToken, err := s.store.GetOrCreateUnsubscribeToken(ctx, cfg.ID)
-		if err != nil {
-			s.logger.Warn("failed to create unsubscribe token", "err", err)
-			unsubToken = ""
-		}
-
-		// Get user fingerprint for dashboard URL
-		user, err := s.store.GetUserByID(ctx, cfg.UserID)
-		dashboardURL := ""
-		if err == nil {
-			dashboardURL = s.originURL + "/" + user.PubkeyFP
-		} else {
-			s.logger.Warn("failed to get user for dashboard URL", "err", err)
-		}
-
-		subject := "feed digest"
-		if err := s.mailer.Send(cfg.Email, subject, htmlBody, textBody, unsubToken, dashboardURL); err != nil {
-			return 0, fmt.Errorf("send email: %w", err)
-		}
-
-		s.logger.Info("email sent", "to", cfg.Email, "items", totalNew)
-
-		for _, result := range results {
-			if result.Error != nil {
-				continue
-			}
-			for _, item := range result.Items {
-				if err := s.store.MarkItemSeen(ctx, result.FeedID, item.GUID, item.Title, item.Link); err != nil {
-					s.logger.Warn("failed to mark item seen", "err", err)
-				}
-			}
-		}
+func (s *Scheduler) sendDigestAndMarkSeen(ctx context.Context, cfg *store.Config, feedGroups []email.FeedGroup, totalNew int, results []*FetchResult) error {
+	digestData := &email.DigestData{
+		ConfigName: cfg.Filename,
+		TotalItems: totalNew,
+		FeedGroups: feedGroups,
 	}
 
-	now := time.Now()
-	nextRun, err := gronx.NextTick(cfg.CronExpr, false)
+	inline := cfg.InlineContent
+	if totalNew > 5 {
+		inline = false
+	}
+
+	htmlBody, textBody, err := email.RenderDigest(digestData, inline)
 	if err != nil {
-		return totalNew, fmt.Errorf("calculate next run: %w", err)
+		return fmt.Errorf("render digest: %w", err)
 	}
 
-	if err := s.store.UpdateLastRun(ctx, cfg.ID, now, nextRun); err != nil {
-		return totalNew, fmt.Errorf("update last run: %w", err)
+	unsubToken, err := s.store.GetOrCreateUnsubscribeToken(ctx, cfg.ID)
+	if err != nil {
+		s.logger.Warn("failed to create unsubscribe token", "err", err)
+		unsubToken = ""
 	}
 
-	_ = s.store.AddLog(ctx, cfg.ID, "info", fmt.Sprintf("Processed: %d new items, next run: %s", totalNew, nextRun.Format(time.RFC3339)))
+	user, err := s.store.GetUserByID(ctx, cfg.UserID)
+	dashboardURL := ""
+	if err == nil {
+		dashboardURL = s.originURL + "/" + user.PubkeyFP
+	} else {
+		s.logger.Warn("failed to get user for dashboard URL", "err", err)
+	}
 
-	return totalNew, nil
+	// Begin transaction to mark items seen
+	tx, err := s.store.BeginTx(ctx)
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Mark items seen BEFORE sending email
+	for _, result := range results {
+		if result.Error != nil {
+			continue
+		}
+		for _, item := range result.Items {
+			if err := s.store.MarkItemSeenTx(ctx, tx, result.FeedID, item.GUID, item.Title, item.Link); err != nil {
+				s.logger.Warn("failed to mark item seen", "err", err)
+			}
+		}
+	}
+
+	// Send email - if this fails, transaction will rollback
+	subject := "feed digest"
+	if err := s.mailer.Send(cfg.Email, subject, htmlBody, textBody, unsubToken, dashboardURL); err != nil {
+		return fmt.Errorf("send email: %w", err)
+	}
+
+	// Commit transaction only after successful email send
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit transaction: %w", err)
+	}
+
+	return nil
 }
 
 func (s *Scheduler) processConfig(ctx context.Context, cfg *store.Config) error {
@@ -218,109 +250,25 @@ func (s *Scheduler) processConfig(ctx context.Context, cfg *store.Config) error 
 
 	results := FetchFeeds(ctx, feeds)
 
-	var feedGroups []email.FeedGroup
-	totalNew := 0
-	threeMonthsAgo := time.Now().AddDate(0, -3, 0)
+	feedGroups, totalNew, err := s.collectNewItems(ctx, results)
+	if err != nil {
+		s.logger.Warn("failed to collect items", "config_id", cfg.ID, "err", err)
+	}
 
+	if totalNew > 0 {
+		if err := s.sendDigestAndMarkSeen(ctx, cfg, feedGroups, totalNew, results); err != nil {
+			return fmt.Errorf("send digest: %w", err)
+		}
+		s.logger.Info("email sent", "to", cfg.Email, "items", totalNew)
+	} else {
+		s.logger.Info("no new items", "config_id", cfg.ID)
+	}
+
+	// Update feed metadata
 	for _, result := range results {
-		if result.Error != nil {
-			s.logger.Warn("feed fetch error", "feed_id", result.FeedID, "url", result.FeedURL, "err", result.Error)
-			continue
-		}
-
-		var newItems []email.FeedItem
-		for _, item := range result.Items {
-			// Skip items older than 3 months
-			if !item.Published.IsZero() && item.Published.Before(threeMonthsAgo) {
-				continue
-			}
-
-			seen, err := s.store.IsItemSeen(ctx, result.FeedID, item.GUID)
-			if err != nil {
-				s.logger.Warn("failed to check if item seen", "err", err)
-				continue
-			}
-
-			if !seen {
-				newItems = append(newItems, email.FeedItem{
-					Title:     item.Title,
-					Link:      item.Link,
-					Content:   item.Content,
-					Published: item.Published,
-				})
-			}
-		}
-
-		if len(newItems) > 0 {
-			feedName := result.FeedName
-			if feedName == "" {
-				feedName = result.FeedURL
-			}
-			feedGroups = append(feedGroups, email.FeedGroup{
-				FeedName: feedName,
-				FeedURL:  result.FeedURL,
-				Items:    newItems,
-			})
-			totalNew += len(newItems)
-		}
-
 		if result.ETag != "" || result.LastModified != "" {
 			if err := s.store.UpdateFeedFetched(ctx, result.FeedID, result.ETag, result.LastModified); err != nil {
 				s.logger.Warn("failed to update feed fetched", "err", err)
-			}
-		}
-	}
-
-	if totalNew == 0 {
-		s.logger.Info("no new items", "config_id", cfg.ID)
-	} else {
-		digestData := &email.DigestData{
-			ConfigName: cfg.Filename,
-			TotalItems: totalNew,
-			FeedGroups: feedGroups,
-		}
-
-		// Auto-disable inline content if more than 5 items
-		inline := cfg.InlineContent
-		if totalNew > 5 {
-			inline = false
-		}
-
-		htmlBody, textBody, err := email.RenderDigest(digestData, inline)
-		if err != nil {
-			return fmt.Errorf("render digest: %w", err)
-		}
-
-		unsubToken, err := s.store.GetOrCreateUnsubscribeToken(ctx, cfg.ID)
-		if err != nil {
-			s.logger.Warn("failed to create unsubscribe token", "err", err)
-			unsubToken = ""
-		}
-
-		// Get user fingerprint for dashboard URL
-		user, err := s.store.GetUserByID(ctx, cfg.UserID)
-		dashboardURL := ""
-		if err == nil {
-			dashboardURL = s.originURL + "/" + user.PubkeyFP
-		} else {
-			s.logger.Warn("failed to get user for dashboard URL", "err", err)
-		}
-
-		subject := "feed digest"
-		if err := s.mailer.Send(cfg.Email, subject, htmlBody, textBody, unsubToken, dashboardURL); err != nil {
-			return fmt.Errorf("send email: %w", err)
-		}
-
-		s.logger.Info("email sent", "to", cfg.Email, "items", totalNew)
-
-		for _, result := range results {
-			if result.Error != nil {
-				continue
-			}
-			for _, item := range result.Items {
-				if err := s.store.MarkItemSeen(ctx, result.FeedID, item.GUID, item.Title, item.Link); err != nil {
-					s.logger.Warn("failed to mark item seen", "err", err)
-				}
 			}
 		}
 	}

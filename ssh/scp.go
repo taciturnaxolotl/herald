@@ -131,21 +131,33 @@ func (h *scpHandler) Write(s ssh.Session, entry *scp.FileEntry) (int64, error) {
 	}
 
 	ctx := s.Context()
-	if err := h.store.DeleteConfig(ctx, user.ID, name); err != nil {
+	
+	// Use transaction for config update
+	tx, err := h.store.BeginTx(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	if err := h.store.DeleteConfigTx(ctx, tx, user.ID, name); err != nil {
 		h.logger.Debug("no existing config to delete", "filename", name)
 	} else {
 		h.logger.Debug("deleted existing config", "filename", name)
 	}
 
-	cfg, err := h.store.CreateConfig(ctx, user.ID, name, parsed.Email, parsed.CronExpr, parsed.Digest, parsed.Inline, string(content), nextRun)
+	cfg, err := h.store.CreateConfigTx(ctx, tx, user.ID, name, parsed.Email, parsed.CronExpr, parsed.Digest, parsed.Inline, string(content), nextRun)
 	if err != nil {
 		return 0, fmt.Errorf("failed to save config: %w", err)
 	}
 
 	for _, feed := range parsed.Feeds {
-		if _, err := h.store.CreateFeed(ctx, cfg.ID, feed.URL, feed.Name); err != nil {
+		if _, err := h.store.CreateFeedTx(ctx, tx, cfg.ID, feed.URL, feed.Name); err != nil {
 			return 0, fmt.Errorf("failed to save feed: %w", err)
 		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("commit transaction: %w", err)
 	}
 
 	h.logger.Info("config uploaded", "user_id", user.ID, "filename", name, "feeds", len(parsed.Feeds), "next_run", nextRun)

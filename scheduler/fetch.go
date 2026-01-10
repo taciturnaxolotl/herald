@@ -122,11 +122,20 @@ func FetchFeed(ctx context.Context, feed *store.Feed) *FetchResult {
 func FetchFeeds(ctx context.Context, feeds []*store.Feed) []*FetchResult {
 	results := make([]*FetchResult, len(feeds))
 	var wg sync.WaitGroup
+	
+	// Limit concurrent fetches to 10 to avoid overwhelming the system
+	maxConcurrent := 10
+	if len(feeds) < maxConcurrent {
+		maxConcurrent = len(feeds)
+	}
+	semaphore := make(chan struct{}, maxConcurrent)
 
 	for i, feed := range feeds {
 		wg.Add(1)
 		go func(idx int, f *store.Feed) {
 			defer wg.Done()
+			semaphore <- struct{}{}        // Acquire
+			defer func() { <-semaphore }() // Release
 			results[idx] = FetchFeed(ctx, f)
 		}(i, feed)
 	}
