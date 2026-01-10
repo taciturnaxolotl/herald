@@ -86,7 +86,7 @@ After uploading a config, run `ssh herald.dunkirk.sh` to get your fingerprint, t
 | `=: email <addr>`   | Yes      | Recipient email address                          |
 | `=: cron <expr>`    | Yes      | Standard cron expression (5 fields)              |
 | `=: digest <bool>`  | No       | Combine all items into one email (default: true) |
-| `=: inline <bool>`  | No       | Include article content in email (default: true) |
+| `=: inline <bool>`  | No       | Include article content in email (default: false) |
 | `=> <url> ["name"]` | Yes (1+) | RSS/Atom feed URL, optional display name         |
 
 ## Configuration

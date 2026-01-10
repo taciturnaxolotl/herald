@@ -168,11 +168,13 @@ func (s *Server) handleWelcome(sess ssh.Session, user *store.User) {
 	fmt.Fprintf(sess, "Upload a config with:\n")
 	fmt.Fprintf(sess, "  scp feeds.txt %s:\n\n", sess.User())
 	fmt.Fprintf(sess, "Commands:\n")
-	fmt.Fprintf(sess, "  ls              List your configs\n")
-	fmt.Fprintf(sess, "  cat <file>      Show config contents\n")
-	fmt.Fprintf(sess, "  rm <file>       Delete a config\n")
-	fmt.Fprintf(sess, "  run <file>      Run a config now\n")
-	fmt.Fprintf(sess, "  logs            Show recent activity\n")
+	fmt.Fprintf(sess, "  ls                   List your configs\n")
+	fmt.Fprintf(sess, "  cat <file>           Show config contents\n")
+	fmt.Fprintf(sess, "  rm <file>            Delete a config\n")
+	fmt.Fprintf(sess, "  activate <file>      Enable a config\n")
+	fmt.Fprintf(sess, "  deactivate <file>    Disable a config\n")
+	fmt.Fprintf(sess, "  run <file>           Run a config now\n")
+	fmt.Fprintf(sess, "  logs                 Show recent activity\n")
 }
 
 func (s *Server) ensureHostKey() error {
