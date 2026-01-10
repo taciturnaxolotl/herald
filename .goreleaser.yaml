@@ -21,6 +21,11 @@ builds:
       - -X main.commitHash={{.Commit}}
     tags:
       - sqlite_foreign_keys
+    overrides:
+      - goos: linux
+        goarch: arm64
+        env:
+          - CC=aarch64-linux-gnu-gcc
 
 archives:
   - id: default
