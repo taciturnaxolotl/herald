@@ -30,20 +30,37 @@ func NewMailer(cfg SMTPConfig, unsubBaseURL string) *Mailer {
 	}
 }
 
-func (m *Mailer) Send(to, subject, htmlBody, textBody, unsubToken string) error {
+func (m *Mailer) Send(to, subject, htmlBody, textBody, unsubToken, dashboardURL string) error {
 	addr := net.JoinHostPort(m.cfg.Host, fmt.Sprintf("%d", m.cfg.Port))
 
 	boundary := "==herald-boundary-a1b2c3d4e5f6=="
 
-	// Add unsubscribe footer if token provided
-	if unsubToken != "" {
-		unsubURL := m.unsubBaseURL + "/unsubscribe/" + unsubToken
-		
-		htmlFooter := fmt.Sprintf(`<hr><p style="font-size: 12px; color: #666;"><a href="%s">Unsubscribe</a></p>`, unsubURL)
-		htmlBody = htmlBody + htmlFooter
-		
-		textFooter := fmt.Sprintf("\n\n---\nUnsubscribe: %s\n", unsubURL)
-		textBody = textBody + textFooter
+	// Add footer with unsubscribe and dashboard links
+	var htmlFooter strings.Builder
+	var textFooter strings.Builder
+
+	if unsubToken != "" || dashboardURL != "" {
+		htmlFooter.WriteString(`<hr><p style="font-size: 12px; color: #666;">`)
+		textFooter.WriteString("\n\n---\n")
+
+		if dashboardURL != "" {
+			htmlFooter.WriteString(fmt.Sprintf(`<a href="%s">profile</a>`, dashboardURL))
+			textFooter.WriteString(fmt.Sprintf("profile: %s\n", dashboardURL))
+		}
+
+		if unsubToken != "" {
+			unsubURL := m.unsubBaseURL + "/unsubscribe/" + unsubToken
+			if dashboardURL != "" {
+				htmlFooter.WriteString(" • ")
+				textFooter.WriteString("")
+			}
+			htmlFooter.WriteString(fmt.Sprintf(`<a href="%s">Unsubscribe</a>`, unsubURL))
+			textFooter.WriteString(fmt.Sprintf("unsubscribe: %s\n", unsubURL))
+		}
+
+		htmlFooter.WriteString("</p>")
+		htmlBody = htmlBody + htmlFooter.String()
+		textBody = textBody + textFooter.String()
 	}
 
 	headers := make(map[string]string)

@@ -12,18 +12,20 @@ import (
 )
 
 type Scheduler struct {
-	store    *store.DB
-	mailer   *email.Mailer
-	logger   *log.Logger
-	interval time.Duration
+	store      *store.DB
+	mailer     *email.Mailer
+	logger     *log.Logger
+	interval   time.Duration
+	originURL  string
 }
 
-func NewScheduler(st *store.DB, mailer *email.Mailer, logger *log.Logger, interval time.Duration) *Scheduler {
+func NewScheduler(st *store.DB, mailer *email.Mailer, logger *log.Logger, interval time.Duration, originURL string) *Scheduler {
 	return &Scheduler{
-		store:    st,
-		mailer:   mailer,
-		logger:   logger,
-		interval: interval,
+		store:     st,
+		mailer:    mailer,
+		logger:    logger,
+		interval:  interval,
+		originURL: originURL,
 	}
 }
 
@@ -158,8 +160,17 @@ func (s *Scheduler) RunNow(ctx context.Context, configID int64) (int, error) {
 			unsubToken = ""
 		}
 
+		// Get user fingerprint for dashboard URL
+		user, err := s.store.GetUserByID(ctx, cfg.UserID)
+		dashboardURL := ""
+		if err == nil {
+			dashboardURL = s.originURL + "/" + user.PubkeyFP
+		} else {
+			s.logger.Warn("failed to get user for dashboard URL", "err", err)
+		}
+
 		subject := "feed digest"
-		if err := s.mailer.Send(cfg.Email, subject, htmlBody, textBody, unsubToken); err != nil {
+		if err := s.mailer.Send(cfg.Email, subject, htmlBody, textBody, unsubToken, dashboardURL); err != nil {
 			return 0, fmt.Errorf("send email: %w", err)
 		}
 
@@ -286,8 +297,17 @@ func (s *Scheduler) processConfig(ctx context.Context, cfg *store.Config) error 
 			unsubToken = ""
 		}
 
+		// Get user fingerprint for dashboard URL
+		user, err := s.store.GetUserByID(ctx, cfg.UserID)
+		dashboardURL := ""
+		if err == nil {
+			dashboardURL = s.originURL + "/" + user.PubkeyFP
+		} else {
+			s.logger.Warn("failed to get user for dashboard URL", "err", err)
+		}
+
 		subject := "feed digest"
-		if err := s.mailer.Send(cfg.Email, subject, htmlBody, textBody, unsubToken); err != nil {
+		if err := s.mailer.Send(cfg.Email, subject, htmlBody, textBody, unsubToken, dashboardURL); err != nil {
 			return fmt.Errorf("send email: %w", err)
 		}
 

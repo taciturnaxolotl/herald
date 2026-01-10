@@ -151,7 +151,7 @@ func runServer(ctx context.Context) error {
 		From: cfg.SMTP.From,
 	}, cfg.Origin)
 
-	sched := scheduler.NewScheduler(db, mailer, logger, 60*time.Second)
+	sched := scheduler.NewScheduler(db, mailer, logger, 60*time.Second, cfg.Origin)
 
 	sshServer := ssh.NewServer(ssh.Config{
 		Host:         cfg.Host,
