@@ -74,8 +74,10 @@ jobs:
             -o ${BINARY_NAME} \
             .
           
-          # Create archive
-          ARCHIVE_NAME="herald_$(echo ${{ matrix.goos }} | sed 's/.*/\u&/')_${{ matrix.goarch == 'amd64' && 'x86_64' || matrix.goarch }}"
+          # Create archive with proper capitalization
+          OS_CAPITALIZED="$(echo ${{ matrix.goos }} | awk '{print toupper(substr($0,1,1)) tolower(substr($0,2))}')"
+          ARCH_NAME="${{ matrix.goarch == 'amd64' && 'x86_64' || matrix.goarch }}"
+          ARCHIVE_NAME="herald_${OS_CAPITALIZED}_${ARCH_NAME}"
           
           if [ "${{ matrix.goos }}" = "windows" ]; then
             zip "${ARCHIVE_NAME}.zip" ${BINARY_NAME} LICENSE.md README.md config.example.yaml
@@ -87,7 +89,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          ARCHIVE_NAME="herald_$(echo ${{ matrix.goos }} | sed 's/.*/\u&/')_${{ matrix.goarch == 'amd64' && 'x86_64' || matrix.goarch }}"
+          OS_CAPITALIZED="$(echo ${{ matrix.goos }} | awk '{print toupper(substr($0,1,1)) tolower(substr($0,2))}')"
+          ARCH_NAME="${{ matrix.goarch == 'amd64' && 'x86_64' || matrix.goarch }}"
+          ARCHIVE_NAME="herald_${OS_CAPITALIZED}_${ARCH_NAME}"
           
           if [ "${{ matrix.goos }}" = "windows" ]; then
             gh release upload ${{ github.ref_name }} "${ARCHIVE_NAME}.zip"
