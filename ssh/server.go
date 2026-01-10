@@ -1,3 +1,4 @@
+// Package ssh provides functionality for Herald.
 package ssh
 
 import (
@@ -139,7 +140,7 @@ func (s *Server) commandMiddleware(next ssh.Handler) ssh.Handler {
 
 		user, ok := sess.Context().Value("user").(*store.User)
 		if !ok {
-			fmt.Fprintln(sess, "Authentication error")
+			println(sess, "Authentication error")
 			return
 		}
 
@@ -163,18 +164,18 @@ func (s *Server) commandMiddleware(next ssh.Handler) ssh.Handler {
 
 func (s *Server) handleWelcome(sess ssh.Session, user *store.User) {
 	fp := sess.Context().Value("fingerprint").(string)
-	fmt.Fprintf(sess, "Welcome to Herald!\n\n")
-	fmt.Fprintf(sess, "Your fingerprint: %s\n\n", fp)
-	fmt.Fprintf(sess, "Upload a config with:\n")
-	fmt.Fprintf(sess, "  scp feeds.txt %s:\n\n", sess.User())
-	fmt.Fprintf(sess, "Commands:\n")
-	fmt.Fprintf(sess, "  ls                   List your configs\n")
-	fmt.Fprintf(sess, "  cat <file>           Show config contents\n")
-	fmt.Fprintf(sess, "  rm <file>            Delete a config\n")
-	fmt.Fprintf(sess, "  activate <file>      Enable a config\n")
-	fmt.Fprintf(sess, "  deactivate <file>    Disable a config\n")
-	fmt.Fprintf(sess, "  run <file>           Run a config now\n")
-	fmt.Fprintf(sess, "  logs                 Show recent activity\n")
+	printf(sess, "Welcome to Herald!\n\n")
+	printf(sess, "Your fingerprint: %s\n\n", fp)
+	printf(sess, "Upload a config with:\n")
+	printf(sess, "  scp feeds.txt %s:\n\n", sess.User())
+	printf(sess, "Commands:\n")
+	printf(sess, "  ls                   List your configs\n")
+	printf(sess, "  cat <file>           Show config contents\n")
+	printf(sess, "  rm <file>            Delete a config\n")
+	printf(sess, "  activate <file>      Enable a config\n")
+	printf(sess, "  deactivate <file>    Disable a config\n")
+	printf(sess, "  run <file>           Run a config now\n")
+	printf(sess, "  logs                 Show recent activity\n")
 }
 
 func (s *Server) ensureHostKey() error {

@@ -34,7 +34,7 @@ func (db *DB) GetLogs(ctx context.Context, configID int64, limit int) ([]*Log, e
 	if err != nil {
 		return nil, fmt.Errorf("query logs: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var logs []*Log
 	for rows.Next() {
@@ -59,7 +59,7 @@ func (db *DB) GetRecentLogs(ctx context.Context, userID int64, limit int) ([]*Lo
 	if err != nil {
 		return nil, fmt.Errorf("query recent logs: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var logs []*Log
 	for rows.Next() {

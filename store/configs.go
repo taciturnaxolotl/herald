@@ -131,7 +131,7 @@ func (db *DB) ListConfigs(ctx context.Context, userID int64) ([]*Config, error) 
 	if err != nil {
 		return nil, fmt.Errorf("query configs: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var configs []*Config
 	for rows.Next() {
@@ -180,7 +180,7 @@ func (db *DB) GetDueConfigs(ctx context.Context, now time.Time) ([]*Config, erro
 	if err != nil {
 		return nil, fmt.Errorf("query due configs: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var configs []*Config
 	for rows.Next() {

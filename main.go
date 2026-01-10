@@ -140,7 +140,7 @@ func runServer(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to open database: %w", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	if err := db.Migrate(); err != nil {
 		return fmt.Errorf("failed to migrate database: %w", err)

@@ -123,13 +123,13 @@ func (db *DB) migrate() error {
 
 func (db *DB) Close() error {
 	if db.stmts != nil {
-		db.stmts.markItemSeen.Close()
-		db.stmts.isItemSeen.Close()
-		db.stmts.getSeenItems.Close()
-		db.stmts.getConfig.Close()
-		db.stmts.updateConfigRun.Close()
-		db.stmts.updateFeedMeta.Close()
-		db.stmts.cleanupSeenItems.Close()
+		_ = db.stmts.markItemSeen.Close()
+		_ = db.stmts.isItemSeen.Close()
+		_ = db.stmts.getSeenItems.Close()
+		_ = db.stmts.getConfig.Close()
+		_ = db.stmts.updateConfigRun.Close()
+		_ = db.stmts.updateFeedMeta.Close()
+		_ = db.stmts.cleanupSeenItems.Close()
 	}
 	return db.DB.Close()
 }

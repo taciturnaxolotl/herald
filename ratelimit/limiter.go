@@ -1,3 +1,4 @@
+// Package ratelimit provides functionality for Herald.
 package ratelimit
 
 import (

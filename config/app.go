@@ -58,7 +58,7 @@ func LoadAppConfig(path string) (*AppConfig, error) {
 	}
 
 	if path != "" {
-		data, err := os.ReadFile(path)
+		data, err := os.ReadFile(path) //nolint:gosec // Config file path from CLI flag
 		if err != nil {
 			return nil, fmt.Errorf("failed to read config file: %w", err)
 		}

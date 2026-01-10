@@ -1,3 +1,4 @@
+// Package store provides functionality for Herald.
 package store
 
 import (

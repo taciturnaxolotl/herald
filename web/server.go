@@ -1,3 +1,4 @@
+// Package web provides functionality for Herald.
 package web
 
 import (
@@ -59,13 +60,14 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	mux.HandleFunc("/metrics", s.handleMetrics)
 
 	srv := &http.Server{
-		Addr:    s.addr,
-		Handler: s.loggingMiddleware(s.rateLimitMiddleware(mux)),
+		Addr:              s.addr,
+		Handler:           s.loggingMiddleware(s.rateLimitMiddleware(mux)),
+		ReadHeaderTimeout: 10 * time.Second,
 	}
 
 	go func() {
 		<-ctx.Done()
-		srv.Shutdown(context.Background())
+		_ = srv.Shutdown(context.Background())
 	}()
 
 	s.logger.Info("web server listening", "addr", s.addr)

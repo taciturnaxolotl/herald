@@ -3,6 +3,7 @@ package ssh
 import (
 	"context"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
@@ -28,6 +29,21 @@ var (
 			Foreground(lipgloss.Color("9"))
 )
 
+// print writes to the session, ignoring errors (connection drops are expected)
+func print(w io.Writer, args ...interface{}) {
+	_, _ = fmt.Fprint(w, args...)
+}
+
+// printf writes formatted output to the session, ignoring errors
+func printf(w io.Writer, format string, args ...interface{}) {
+	_, _ = fmt.Fprintf(w, format, args...)
+}
+
+// println writes a line to the session, ignoring errors
+func println(w io.Writer, args ...interface{}) {
+	_, _ = fmt.Fprintln(w, args...)
+}
+
 func HandleCommand(sess ssh.Session, user *store.User, st *store.DB, sched *scheduler.Scheduler, logger *log.Logger) {
 	cmd := sess.Command()
 	if len(cmd) == 0 {
@@ -41,55 +57,55 @@ func HandleCommand(sess ssh.Session, user *store.User, st *store.DB, sched *sche
 		handleLs(ctx, sess, user, st)
 	case "cat":
 		if len(cmd) < 2 {
-			fmt.Fprintln(sess, errorStyle.Render("Usage: cat <filename>"))
+			println(sess, errorStyle.Render("Usage: cat <filename>"))
 			return
 		}
 		handleCat(ctx, sess, user, st, cmd[1])
 	case "rm":
 		if len(cmd) < 2 {
-			fmt.Fprintln(sess, errorStyle.Render("Usage: rm <filename>"))
+			println(sess, errorStyle.Render("Usage: rm <filename>"))
 			return
 		}
 		handleRm(ctx, sess, user, st, cmd[1])
 	case "activate":
 		if len(cmd) < 2 {
-			fmt.Fprintln(sess, errorStyle.Render("Usage: activate <filename>"))
+			println(sess, errorStyle.Render("Usage: activate <filename>"))
 			return
 		}
 		handleActivate(ctx, sess, user, st, cmd[1])
 	case "deactivate":
 		if len(cmd) < 2 {
-			fmt.Fprintln(sess, errorStyle.Render("Usage: deactivate <filename>"))
+			println(sess, errorStyle.Render("Usage: deactivate <filename>"))
 			return
 		}
 		handleDeactivate(ctx, sess, user, st, cmd[1])
 	case "run":
 		if len(cmd) < 2 {
-			fmt.Fprintln(sess, errorStyle.Render("Usage: run <filename>"))
+			println(sess, errorStyle.Render("Usage: run <filename>"))
 			return
 		}
 		handleRun(ctx, sess, user, st, sched, cmd[1])
 	case "logs":
 		handleLogs(ctx, sess, user, st)
 	default:
-		fmt.Fprintf(sess, errorStyle.Render("Unknown command: %s\n"), cmd[0])
-		fmt.Fprintln(sess, "Available commands: ls, cat, rm, activate, deactivate, run, logs")
+		printf(sess, errorStyle.Render("Unknown command: %s\n"), cmd[0])
+		println(sess, "Available commands: ls, cat, rm, activate, deactivate, run, logs")
 	}
 }
 
 func handleLs(ctx context.Context, sess ssh.Session, user *store.User, st *store.DB) {
 	configs, err := st.ListConfigs(ctx, user.ID)
 	if err != nil {
-		fmt.Fprintln(sess, errorStyle.Render("Error: "+err.Error()))
+		println(sess, errorStyle.Render("Error: "+err.Error()))
 		return
 	}
 
 	if len(configs) == 0 {
-		fmt.Fprintln(sess, dimStyle.Render("No configs found. Upload one with: scp feeds.txt <host>:"))
+		println(sess, dimStyle.Render("No configs found. Upload one with: scp feeds.txt <host>:"))
 		return
 	}
 
-	fmt.Fprintln(sess, titleStyle.Render("Your configs:"))
+	println(sess, titleStyle.Render("Your configs:"))
 
 	for _, cfg := range configs {
 		feeds, err := st.GetFeedsByConfig(ctx, cfg.ID)
@@ -103,7 +119,7 @@ func handleLs(ctx context.Context, sess ssh.Session, user *store.User, st *store
 			nextRunStr = formatRelativeTime(cfg.NextRun.Time)
 		}
 
-		fmt.Fprintf(sess, "  %-20s %s  next: %s\n",
+		printf(sess, "  %-20s %s  next: %s\n",
 			cfg.Filename,
 			dimStyle.Render(fmt.Sprintf("%d feed(s)", feedCount)),
 			nextRunStr,
@@ -114,48 +130,48 @@ func handleLs(ctx context.Context, sess ssh.Session, user *store.User, st *store
 func handleCat(ctx context.Context, sess ssh.Session, user *store.User, st *store.DB, filename string) {
 	cfg, err := st.GetConfig(ctx, user.ID, filename)
 	if err != nil {
-		fmt.Fprintln(sess, errorStyle.Render("Config not found: "+filename))
+		println(sess, errorStyle.Render("Config not found: "+filename))
 		return
 	}
 
-	fmt.Fprintln(sess, titleStyle.Render("# "+filename))
-	fmt.Fprintln(sess, cfg.RawText)
+	println(sess, titleStyle.Render("# "+filename))
+	println(sess, cfg.RawText)
 }
 
 func handleRm(ctx context.Context, sess ssh.Session, user *store.User, st *store.DB, filename string) {
 	err := st.DeleteConfig(ctx, user.ID, filename)
 	if err != nil {
-		fmt.Fprintln(sess, errorStyle.Render("Error: "+err.Error()))
+		println(sess, errorStyle.Render("Error: "+err.Error()))
 		return
 	}
 
-	fmt.Fprintln(sess, successStyle.Render("Deleted: "+filename))
+	println(sess, successStyle.Render("Deleted: "+filename))
 }
 
 func handleActivate(ctx context.Context, sess ssh.Session, user *store.User, st *store.DB, filename string) {
 	err := st.ActivateConfig(ctx, user.ID, filename)
 	if err != nil {
-		fmt.Fprintln(sess, errorStyle.Render("Error: "+err.Error()))
+		println(sess, errorStyle.Render("Error: "+err.Error()))
 		return
 	}
 
-	fmt.Fprintln(sess, successStyle.Render("Activated: "+filename))
+	println(sess, successStyle.Render("Activated: "+filename))
 }
 
 func handleDeactivate(ctx context.Context, sess ssh.Session, user *store.User, st *store.DB, filename string) {
 	err := st.DeactivateConfigByFilename(ctx, user.ID, filename)
 	if err != nil {
-		fmt.Fprintln(sess, errorStyle.Render("Error: "+err.Error()))
+		println(sess, errorStyle.Render("Error: "+err.Error()))
 		return
 	}
 
-	fmt.Fprintln(sess, successStyle.Render("Deactivated: "+filename))
+	println(sess, successStyle.Render("Deactivated: "+filename))
 }
 
 func handleRun(ctx context.Context, sess ssh.Session, user *store.User, st *store.DB, sched *scheduler.Scheduler, filename string) {
 	cfg, err := st.GetConfig(ctx, user.ID, filename)
 	if err != nil {
-		fmt.Fprintln(sess, errorStyle.Render("Config not found: "+filename))
+		println(sess, errorStyle.Render("Config not found: "+filename))
 		return
 	}
 
@@ -175,7 +191,7 @@ func handleRun(ctx context.Context, sess ssh.Session, user *store.User, st *stor
 			case <-done:
 				return
 			default:
-				fmt.Fprintf(sess, "\r%s Fetching feeds...", spinChars[i%len(spinChars)])
+				printf(sess, "\r%s Fetching feeds...", spinChars[i%len(spinChars)])
 				i++
 				time.Sleep(80 * time.Millisecond)
 			}
@@ -194,33 +210,33 @@ func handleRun(ctx context.Context, sess ssh.Session, user *store.User, st *stor
 	// Wait for result
 	res := <-result
 	close(done)
-	fmt.Fprint(sess, "\r\033[K") // Clear the spinner line
+	print(sess, "\r\033[K") // Clear the spinner line
 
 	if res.err != nil {
-		fmt.Fprintln(sess, errorStyle.Render("Error: "+res.err.Error()))
+		println(sess, errorStyle.Render("Error: "+res.err.Error()))
 		return
 	}
 
 	if res.items == 0 {
-		fmt.Fprintln(sess, dimStyle.Render("No new items found."))
+		println(sess, dimStyle.Render("No new items found."))
 	} else {
-		fmt.Fprintln(sess, successStyle.Render(fmt.Sprintf("Sent %d new item(s) to %s", res.items, cfg.Email)))
+		println(sess, successStyle.Render(fmt.Sprintf("Sent %d new item(s) to %s", res.items, cfg.Email)))
 	}
 }
 
 func handleLogs(ctx context.Context, sess ssh.Session, user *store.User, st *store.DB) {
 	logs, err := st.GetRecentLogs(ctx, user.ID, 20)
 	if err != nil {
-		fmt.Fprintln(sess, errorStyle.Render("Error: "+err.Error()))
+		println(sess, errorStyle.Render("Error: "+err.Error()))
 		return
 	}
 
 	if len(logs) == 0 {
-		fmt.Fprintln(sess, dimStyle.Render("No logs yet."))
+		println(sess, dimStyle.Render("No logs yet."))
 		return
 	}
 
-	fmt.Fprintln(sess, titleStyle.Render("Recent activity:"))
+	println(sess, titleStyle.Render("Recent activity:"))
 
 	for _, l := range logs {
 		levelStyle := dimStyle
@@ -232,7 +248,7 @@ func handleLogs(ctx context.Context, sess ssh.Session, user *store.User, st *sto
 		}
 
 		timestamp := l.CreatedAt.Format("Jan 02 15:04")
-		fmt.Fprintf(sess, "  %s  %s  %s\n",
+		printf(sess, "  %s  %s  %s\n",
 			dimStyle.Render(timestamp),
 			levelStyle.Render(fmt.Sprintf("[%s]", l.Level)),
 			l.Message,

@@ -39,7 +39,7 @@ func SFTPHandler(st *store.DB, sched *scheduler.Scheduler, logger *log.Logger) f
 		})
 
 		if err := server.Serve(); err == io.EOF {
-			server.Close()
+			_ = server.Close()
 		} else if err != nil {
 			logger.Error("SFTP server error", "err", err)
 		}

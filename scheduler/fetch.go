@@ -1,3 +1,4 @@
+// Package scheduler provides functionality for Herald.
 package scheduler
 
 import (
@@ -70,7 +71,7 @@ func FetchFeed(ctx context.Context, feed *store.Feed) *FetchResult {
 		result.Error = err
 		return result
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusNotModified {
 		return result

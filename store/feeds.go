@@ -80,7 +80,7 @@ func (db *DB) GetFeedsByConfig(ctx context.Context, configID int64) ([]*Feed, er
 	if err != nil {
 		return nil, fmt.Errorf("query feeds: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var feeds []*Feed
 	for rows.Next() {
@@ -119,7 +119,7 @@ func (db *DB) GetFeedsByConfigs(ctx context.Context, configIDs []int64) (map[int
 	if err != nil {
 		return nil, fmt.Errorf("query feeds: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	feedMap := make(map[int64][]*Feed)
 	for rows.Next() {

@@ -1,3 +1,4 @@
+// Package config handles Herald configuration parsing and validation.
 package config
 
 import (

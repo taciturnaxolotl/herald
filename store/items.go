@@ -70,7 +70,7 @@ func (db *DB) GetSeenItems(ctx context.Context, feedID int64, limit int) ([]*See
 	if err != nil {
 		return nil, fmt.Errorf("query seen items: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var items []*SeenItem
 	for rows.Next() {
@@ -110,7 +110,7 @@ func (db *DB) GetSeenGUIDs(ctx context.Context, feedID int64, guids []string) (m
 	if err != nil {
 		return nil, fmt.Errorf("query seen guids: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	seenSet := make(map[string]bool)
 	for rows.Next() {

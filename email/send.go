@@ -50,13 +50,13 @@ func (m *Mailer) ValidateConfig() error {
 		if err != nil {
 			return fmt.Errorf("TLS dial: %w", err)
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 
 		client, err := smtp.NewClient(conn, m.cfg.Host)
 		if err != nil {
 			return fmt.Errorf("SMTP client: %w", err)
 		}
-		defer client.Close()
+		defer func() { _ = client.Close() }()
 
 		if auth != nil {
 			if err = client.Auth(auth); err != nil {
@@ -72,13 +72,13 @@ func (m *Mailer) ValidateConfig() error {
 	if err != nil {
 		return fmt.Errorf("dial: %w", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	client, err := smtp.NewClient(conn, m.cfg.Host)
 	if err != nil {
 		return fmt.Errorf("SMTP client: %w", err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	// Start TLS before auth
 	tlsConfig := &tls.Config{
@@ -182,8 +182,8 @@ func (m *Mailer) Send(to, subject, htmlBody, textBody, unsubToken, dashboardURL 
 func encodeQuotedPrintable(s string) string {
 	var buf strings.Builder
 	w := quotedprintable.NewWriter(&buf)
-	w.Write([]byte(s))
-	w.Close()
+	_, _ = w.Write([]byte(s))
+	_ = w.Close()
 	return buf.String()
 }
 
@@ -197,13 +197,13 @@ func (m *Mailer) sendWithTLS(addr string, auth smtp.Auth, to, msg string) error 
 	if err != nil {
 		return fmt.Errorf("TLS dial: %w", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	client, err := smtp.NewClient(conn, m.cfg.Host)
 	if err != nil {
 		return fmt.Errorf("SMTP client: %w", err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	if auth != nil {
 		if err = client.Auth(auth); err != nil {

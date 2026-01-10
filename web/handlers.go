@@ -56,7 +56,7 @@ func (s *Server) handleStyleCSS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/css; charset=utf-8")
-	w.Write(css)
+	_, _ = w.Write(css)
 }
 
 type userPageData struct {
@@ -298,10 +298,10 @@ func (s *Server) handleFeedXML(w http.ResponseWriter, r *http.Request, fingerpri
 		}
 	}
 
-	w.Write([]byte(xml.Header))
+	_, _ = w.Write([]byte(xml.Header))
 	enc := xml.NewEncoder(w)
 	enc.Indent("", "  ")
-	enc.Encode(feed)
+	_ = enc.Encode(feed)
 }
 
 type jsonFeed struct {
@@ -427,7 +427,7 @@ func (s *Server) handleFeedJSON(w http.ResponseWriter, r *http.Request, fingerpr
 
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
-	enc.Encode(feed)
+	_ = enc.Encode(feed)
 }
 
 func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request, fingerprint, filename string) {
@@ -456,7 +456,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request, fingerprin
 	}
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.Write([]byte(cfg.RawText))
+	_, _ = w.Write([]byte(cfg.RawText))
 }
 
 type unsubscribePageData struct {

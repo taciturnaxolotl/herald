@@ -154,7 +154,7 @@ func (h *scpHandler) Write(s ssh.Session, entry *scp.FileEntry) (int64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("begin transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	if err := h.store.DeleteConfigTx(ctx, tx, user.ID, name); err != nil {
 		h.logger.Debug("no existing config to delete", "filename", name)

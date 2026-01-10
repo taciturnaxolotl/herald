@@ -14,7 +14,7 @@ func setupTestDB(t *testing.T) *DB {
 		t.Fatalf("failed to open test db: %v", err)
 	}
 	t.Cleanup(func() {
-		db.Close()
+		_ = db.Close()
 	})
 	return db
 }
@@ -24,7 +24,7 @@ func TestOpen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open failed: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	if db.DB == nil {
 		t.Error("DB.DB is nil")
@@ -157,8 +157,8 @@ func TestListConfigs(t *testing.T) {
 
 	user, _ := db.GetOrCreateUser(ctx, "test-fp", "test-pubkey")
 	nextRun := time.Now().Add(time.Hour)
-	db.CreateConfig(ctx, user.ID, "config1.herald", "user@example.com", "0 8 * * *", true, false, "raw1", nextRun)
-	db.CreateConfig(ctx, user.ID, "config2.herald", "user@example.com", "0 9 * * *", false, true, "raw2", nextRun)
+	_, _ = db.CreateConfig(ctx, user.ID, "config1.herald", "user@example.com", "0 8 * * *", true, false, "raw1", nextRun)
+	_, _ = db.CreateConfig(ctx, user.ID, "config2.herald", "user@example.com", "0 9 * * *", false, true, "raw2", nextRun)
 
 	configs, err := db.ListConfigs(ctx, user.ID)
 	if err != nil {
@@ -212,7 +212,7 @@ func TestDeleteConfig(t *testing.T) {
 
 	user, _ := db.GetOrCreateUser(ctx, "test-fp", "test-pubkey")
 	nextRun := time.Now().Add(time.Hour)
-	db.CreateConfig(ctx, user.ID, "test.herald", "user@example.com", "0 8 * * *", true, false, "raw", nextRun)
+	_, _ = db.CreateConfig(ctx, user.ID, "test.herald", "user@example.com", "0 8 * * *", true, false, "raw", nextRun)
 
 	err := db.DeleteConfig(ctx, user.ID, "test.herald")
 	if err != nil {
@@ -253,8 +253,8 @@ func TestGetFeedsByConfig(t *testing.T) {
 	user, _ := db.GetOrCreateUser(ctx, "test-fp", "test-pubkey")
 	nextRun := time.Now().Add(time.Hour)
 	cfg, _ := db.CreateConfig(ctx, user.ID, "test.herald", "user@example.com", "0 8 * * *", true, false, "raw", nextRun)
-	db.CreateFeed(ctx, cfg.ID, "https://feed1.com/rss", "Feed 1")
-	db.CreateFeed(ctx, cfg.ID, "https://feed2.com/atom", "Feed 2")
+	_, _ = db.CreateFeed(ctx, cfg.ID, "https://feed1.com/rss", "Feed 1")
+	_, _ = db.CreateFeed(ctx, cfg.ID, "https://feed2.com/atom", "Feed 2")
 
 	feeds, err := db.GetFeedsByConfig(ctx, cfg.ID)
 	if err != nil {
@@ -318,8 +318,8 @@ func TestGetSeenGUIDs(t *testing.T) {
 	feed, _ := db.CreateFeed(ctx, cfg.ID, "https://example.com/feed.xml", "")
 
 	// Mark some items as seen
-	db.MarkItemSeen(ctx, feed.ID, "guid1", "Title 1", "link1")
-	db.MarkItemSeen(ctx, feed.ID, "guid2", "Title 2", "link2")
+	_ = db.MarkItemSeen(ctx, feed.ID, "guid1", "Title 1", "link1")
+	_ = db.MarkItemSeen(ctx, feed.ID, "guid2", "Title 2", "link2")
 
 	// Query for seen GUIDs
 	seenSet, err := db.GetSeenGUIDs(ctx, feed.ID, []string{"guid1", "guid2", "guid3"})
@@ -348,7 +348,7 @@ func TestCleanupOldSeenItems(t *testing.T) {
 	feed, _ := db.CreateFeed(ctx, cfg.ID, "https://example.com/feed.xml", "")
 
 	// Mark item as seen
-	db.MarkItemSeen(ctx, feed.ID, "old-item", "Old Item", "link")
+	_ = db.MarkItemSeen(ctx, feed.ID, "old-item", "Old Item", "link")
 
 	// Wait to ensure timestamp is old enough
 	time.Sleep(50 * time.Millisecond)
