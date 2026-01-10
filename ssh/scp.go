@@ -137,12 +137,17 @@ func (h *scpHandler) Write(s ssh.Session, entry *scp.FileEntry) (int64, error) {
 		return 0, fmt.Errorf("invalid config: %w", err)
 	}
 
+	ctx := s.Context()
+
+	// Validate feed URLs by attempting to fetch them
+	if err := config.ValidateFeedURLs(ctx, parsed); err != nil {
+		return 0, fmt.Errorf("feed validation failed: %w", err)
+	}
+
 	nextRun, err := calculateNextRun(parsed.CronExpr)
 	if err != nil {
 		return 0, fmt.Errorf("failed to calculate next run: %w", err)
 	}
-
-	ctx := s.Context()
 	
 	// Use transaction for config update
 	tx, err := h.store.BeginTx(ctx)

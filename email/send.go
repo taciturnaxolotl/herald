@@ -30,6 +30,72 @@ func NewMailer(cfg SMTPConfig, unsubBaseURL string) *Mailer {
 	}
 }
 
+// ValidateConfig tests SMTP connectivity and auth
+func (m *Mailer) ValidateConfig() error {
+	addr := net.JoinHostPort(m.cfg.Host, fmt.Sprintf("%d", m.cfg.Port))
+
+	var auth smtp.Auth
+	if m.cfg.User != "" && m.cfg.Pass != "" {
+		auth = smtp.PlainAuth("", m.cfg.User, m.cfg.Pass, m.cfg.Host)
+	}
+
+	// Port 465 uses implicit TLS
+	if m.cfg.Port == 465 {
+		tlsConfig := &tls.Config{
+			ServerName: m.cfg.Host,
+		}
+
+		conn, err := tls.Dial("tcp", addr, tlsConfig)
+		if err != nil {
+			return fmt.Errorf("TLS dial: %w", err)
+		}
+		defer conn.Close()
+
+		client, err := smtp.NewClient(conn, m.cfg.Host)
+		if err != nil {
+			return fmt.Errorf("SMTP client: %w", err)
+		}
+		defer client.Close()
+
+		if auth != nil {
+			if err = client.Auth(auth); err != nil {
+				return fmt.Errorf("auth: %w", err)
+			}
+		}
+
+		return client.Quit()
+	}
+
+	// Port 587 uses STARTTLS
+	conn, err := net.Dial("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("dial: %w", err)
+	}
+	defer conn.Close()
+
+	client, err := smtp.NewClient(conn, m.cfg.Host)
+	if err != nil {
+		return fmt.Errorf("SMTP client: %w", err)
+	}
+	defer client.Close()
+
+	// Start TLS before auth
+	tlsConfig := &tls.Config{
+		ServerName: m.cfg.Host,
+	}
+	if err = client.StartTLS(tlsConfig); err != nil {
+		return fmt.Errorf("STARTTLS: %w", err)
+	}
+
+	if auth != nil {
+		if err = client.Auth(auth); err != nil {
+			return fmt.Errorf("auth: %w", err)
+		}
+	}
+
+	return client.Quit()
+}
+
 func (m *Mailer) Send(to, subject, htmlBody, textBody, unsubToken, dashboardURL string) error {
 	addr := net.JoinHostPort(m.cfg.Host, fmt.Sprintf("%d", m.cfg.Port))
 

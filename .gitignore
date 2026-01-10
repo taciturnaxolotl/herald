@@ -5,7 +5,7 @@ herald
 config.yaml
 
 # Database
-*.db
+*.db*
 
 # SSH host keys
 host_key

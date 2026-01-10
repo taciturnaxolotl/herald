@@ -169,6 +169,11 @@ func runServer(ctx context.Context) error {
 		From: cfg.SMTP.From,
 	}, cfg.Origin)
 
+	// Validate SMTP configuration
+	if err := mailer.ValidateConfig(); err != nil {
+		return fmt.Errorf("SMTP validation failed: %w", err)
+	}
+
 	sched := scheduler.NewScheduler(db, mailer, logger, 60*time.Second, cfg.Origin)
 
 	sshServer := ssh.NewServer(ssh.Config{
