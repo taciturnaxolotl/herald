@@ -87,28 +87,27 @@ func (db *DB) MarkEmailOpened(trackingToken string) error {
 	return nil
 }
 
-// GetInactiveConfigs returns config IDs that haven't had opens in the specified days
-func (db *DB) GetInactiveConfigs(daysWithoutOpen int, minSends int) ([]int64, error) {
+// GetInactiveConfigs returns config IDs that haven't had keep-alive activity in the specified days
+func (db *DB) GetInactiveConfigs(daysWithoutActivity int, minSends int) ([]int64, error) {
 	query := `
-		SELECT DISTINCT es.config_id
-		FROM email_sends es
-		WHERE es.config_id IN (
+		SELECT DISTINCT c.id
+		FROM configs c
+		INNER JOIN email_sends es ON es.config_id = c.id
+		WHERE c.id IN (
 			SELECT config_id
 			FROM email_sends
 			GROUP BY config_id
 			HAVING COUNT(*) >= ?
 		)
-		AND es.sent_at > datetime('now', '-' || ? || ' days')
-		AND es.config_id NOT IN (
-			SELECT config_id
-			FROM email_sends
-			WHERE opened = TRUE
-			AND sent_at > datetime('now', '-' || ? || ' days')
+		AND (
+			c.last_active_at IS NULL
+			OR c.last_active_at < datetime('now', '-' || ? || ' days')
 		)
-		GROUP BY es.config_id
+		AND c.created_at < datetime('now', '-' || ? || ' days')
+		GROUP BY c.id
 	`
 
-	rows, err := db.Query(query, minSends, daysWithoutOpen, daysWithoutOpen)
+	rows, err := db.Query(query, minSends, daysWithoutActivity, daysWithoutActivity)
 	if err != nil {
 		return nil, fmt.Errorf("query inactive configs: %w", err)
 	}
@@ -197,3 +196,28 @@ func generateTrackingToken() (string, error) {
 	}
 	return base64.URLEncoding.EncodeToString(b), nil
 }
+
+// UpdateLastActive updates the last_active_at timestamp for a config by tracking token
+func (db *DB) UpdateLastActive(trackingToken string) error {
+	query := `UPDATE configs
+	          SET last_active_at = CURRENT_TIMESTAMP
+	          WHERE id = (
+	              SELECT config_id FROM email_sends WHERE tracking_token = ? LIMIT 1
+	          )`
+	result, err := db.Exec(query, trackingToken)
+	if err != nil {
+		return fmt.Errorf("update last active: %w", err)
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("rows affected: %w", err)
+	}
+
+	if rows == 0 {
+		return fmt.Errorf("tracking token not found")
+	}
+
+	return nil
+}
+

@@ -47,13 +47,19 @@ func init() {
 	}
 }
 
-func RenderDigest(data *DigestData, inline bool) (html string, text string, err error) {
+func RenderDigest(data *DigestData, inline bool, daysUntilExpiry int, showUrgentBanner, showWarningBanner bool) (html string, text string, err error) {
 	tmplData := struct {
 		*DigestData
-		Inline bool
+		Inline            bool
+		DaysUntilExpiry   int
+		ShowUrgentBanner  bool
+		ShowWarningBanner bool
 	}{
-		DigestData: data,
-		Inline:     inline,
+		DigestData:        data,
+		Inline:            inline,
+		DaysUntilExpiry:   daysUntilExpiry,
+		ShowUrgentBanner:  showUrgentBanner,
+		ShowWarningBanner: showWarningBanner,
 	}
 
 	var htmlBuf, textBuf bytes.Buffer

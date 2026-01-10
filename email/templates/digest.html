@@ -1,48 +1,82 @@
 <!DOCTYPE html>
 <html>
+
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<style>
-img {
-    max-width: 100%;
-    height: auto;
-}
-.feeds {
-    max-width: 100%;
-}
-</style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    img {
+      max-width: 100%;
+      height: auto;
+    }
+
+    .feeds {
+      max-width: 100%;
+    }
+
+    .expiry-banner {
+      padding: 15px;
+      margin-bottom: 20px;
+      border-radius: 4px;
+      font-size: 14px;
+    }
+
+    .expiry-urgent {
+      background-color: #fee;
+      border: 2px solid #f44;
+      color: #c00;
+    }
+
+    .expiry-warning {
+      background-color: #ffc;
+      border: 1px solid #fc0;
+      color: #840;
+    }
+  </style>
 </head>
+
 <body>
-<div class="feeds">
-{{range .FeedGroups}}
-<div style="margin-bottom: 10px;">
-<h1 style="margin-bottom: 3px;"><a href="{{.FeedURL}}">{{.FeedName}}</a></h1>
-</div>
+  {{if .ShowUrgentBanner}}
+  <div class="expiry-banner expiry-urgent">
+    Your digest expires in {{.DaysUntilExpiry}} days. Click "keep this digest active" below to continue receiving
+    updates or your feed will be deactivated.
+  </div>
+  {{else if .ShowWarningBanner}}
+  <div class="expiry-banner expiry-warning">
+    Your digest expires in {{.DaysUntilExpiry}} days. Click "keep this digest active" below to
+    extend it.
+  </div>
+  {{end}}
+  <div class="feeds">
+    {{range .FeedGroups}}
+    <div style="margin-bottom: 10px;">
+      <h1 style="margin-bottom: 3px;"><a href="{{.FeedURL}}">{{.FeedName}}</a></h1>
+    </div>
 
-<div class="summary">
-<h2>Entries</h2>
-{{range .Items}}
-<ul>
-<li><a href="{{.Link}}">{{.Title}}</a></li>
-</ul>
-{{end}}
-</div>
+    <div class="summary">
+      <h2>Entries</h2>
+      {{range .Items}}
+      <ul>
+        <li><a href="{{.Link}}">{{.Title}}</a></li>
+      </ul>
+      {{end}}
+    </div>
 
-{{if $.Inline}}
-<div>
-{{range .Items}}
-<div>
-<h1><a href="{{.Link}}">{{.Title}}</a></h1>
-<div>{{.Content}}</div>
-</div>
-<hr />
-{{end}}
-</div>
-{{end}}
+    {{if $.Inline}}
+    <div>
+      {{range .Items}}
+      <div>
+        <h1><a href="{{.Link}}">{{.Title}}</a></h1>
+        <div>{{.Content}}</div>
+      </div>
+      <hr />
+      {{end}}
+    </div>
+    {{end}}
 
-<hr style="margin: 10px 0;" />
-{{end}}
-</div>
+    <hr style="margin: 10px 0;" />
+    {{end}}
+  </div>
 </body>
+
 </html>

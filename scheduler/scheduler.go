@@ -354,8 +354,14 @@ func (s *Scheduler) sendDigestAndMarkSeen(ctx context.Context, cfg *store.Config
 		inline = false
 	}
 
+	// Calculate expiry info
+	expiryDate := cfg.CreatedAt.AddDate(0, 0, 90)
+	daysUntilExpiry := int(time.Until(expiryDate).Hours() / 24)
+	showUrgentBanner := daysUntilExpiry <= 7 && daysUntilExpiry >= 0
+	showWarningBanner := daysUntilExpiry > 7 && daysUntilExpiry <= 30
+
 	s.logger.Debug("sendDigestAndMarkSeen: rendering digest")
-	htmlBody, textBody, err := email.RenderDigest(digestData, inline)
+	htmlBody, textBody, err := email.RenderDigest(digestData, inline, daysUntilExpiry, showUrgentBanner, showWarningBanner)
 	if err != nil {
 		return fmt.Errorf("render digest: %w", err)
 	}
@@ -404,7 +410,7 @@ func (s *Scheduler) sendDigestAndMarkSeen(ctx context.Context, cfg *store.Config
 	}
 	s.logger.Debug("sendDigestAndMarkSeen: items marked seen")
 
-	// Generate tracking token BEFORE recording (needed for email pixel URL)
+	// Generate tracking token BEFORE recording (needed for keep-alive URL)
 	trackingToken, err := s.store.GenerateTrackingToken()
 	if err != nil {
 		s.logger.Warn("failed to generate tracking token", "err", err)
@@ -420,9 +426,15 @@ func (s *Scheduler) sendDigestAndMarkSeen(ctx context.Context, cfg *store.Config
 	}
 	s.logger.Debug("sendDigestAndMarkSeen: recorded email send")
 	
+	// Build keep-alive URL
+	keepAliveURL := ""
+	if trackingToken != "" {
+		keepAliveURL = s.originURL + "/keep-alive/" + trackingToken
+	}
+	
 	// Send email - if this fails, transaction will rollback
 	s.logger.Debug("sendDigestAndMarkSeen: calling mailer.Send", "to", cfg.Email)
-	if err := s.mailer.Send(cfg.Email, subject, htmlBody, textBody, unsubToken, dashboardURL, trackingToken); err != nil {
+	if err := s.mailer.Send(cfg.Email, subject, htmlBody, textBody, unsubToken, dashboardURL, keepAliveURL); err != nil {
 		s.logger.Error("sendDigestAndMarkSeen: mailer.Send failed", "err", err)
 		return fmt.Errorf("send email: %w", err)
 	}

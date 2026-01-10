@@ -70,16 +70,15 @@ type userPageData struct {
 }
 
 type configInfo struct {
-	Filename      string
-	FeedCount     int
-	URL           string
-	FeedXMLURL    string
-	FeedJSONURL   string
-	IsActive      bool
-	TotalSends    int
-	Opens         int
-	OpenRate      float64
-	LastOpenDays  int
+	Filename        string
+	FeedCount       int
+	URL             string
+	FeedXMLURL      string
+	FeedJSONURL     string
+	IsActive        bool
+	TotalSends      int
+	LastActiveDays  int
+	DaysUntilExpiry int
 }
 
 func (s *Server) handleUser(w http.ResponseWriter, r *http.Request, fingerprint string) {
@@ -134,33 +133,36 @@ func (s *Server) handleUser(w http.ResponseWriter, r *http.Request, fingerprint 
 		feedBaseName := strings.TrimSuffix(cfg.Filename, ".txt")
 
 		// Get engagement stats (last 90 days)
-		totalSends, opens, _, lastOpen, err := s.store.GetConfigEngagement(cfg.ID, 90)
+		totalSends, _, _, _, err := s.store.GetConfigEngagement(cfg.ID, 90)
 		if err != nil {
 			s.logger.Warn("get engagement", "config_id", cfg.ID, "err", err)
 			// Continue without engagement data
 		}
 
-		openRate := 0.0
-		if totalSends > 0 {
-			openRate = float64(opens) / float64(totalSends) * 100
+		// Calculate last active days and expiry
+		lastActiveDays := -1
+		if cfg.LastActiveAt.Valid {
+			lastActiveDays = int(time.Since(cfg.LastActiveAt.Time).Hours() / 24)
 		}
 
-		lastOpenDays := -1
-		if lastOpen != nil {
-			lastOpenDays = int(time.Since(*lastOpen).Hours() / 24)
+		// Calculate expiry from the most recent of created_at or last_active_at
+		expiryBase := cfg.CreatedAt
+		if cfg.LastActiveAt.Valid && cfg.LastActiveAt.Time.After(cfg.CreatedAt) {
+			expiryBase = cfg.LastActiveAt.Time
 		}
+		expiryDate := expiryBase.AddDate(0, 0, 90)
+		daysUntilExpiry := int(time.Until(expiryDate).Hours() / 24)
 
 		configInfos = append(configInfos, configInfo{
-			Filename:     cfg.Filename,
-			FeedCount:    len(feeds),
-			URL:          "/" + fingerprint + "/" + cfg.Filename,
-			FeedXMLURL:   "/" + fingerprint + "/" + feedBaseName + ".xml",
-			FeedJSONURL:  "/" + fingerprint + "/" + feedBaseName + ".json",
-			IsActive:     isActive,
-			TotalSends:   totalSends,
-			Opens:        opens,
-			OpenRate:     openRate,
-			LastOpenDays: lastOpenDays,
+			Filename:        cfg.Filename,
+			FeedCount:       len(feeds),
+			URL:             "/" + fingerprint + "/" + cfg.Filename,
+			FeedXMLURL:      "/" + fingerprint + "/" + feedBaseName + ".xml",
+			FeedJSONURL:     "/" + fingerprint + "/" + feedBaseName + ".json",
+			IsActive:        isActive,
+			TotalSends:      totalSends,
+			LastActiveDays:  lastActiveDays,
+			DaysUntilExpiry: daysUntilExpiry,
 		})
 
 		if cfg.NextRun.Valid {
@@ -682,35 +684,43 @@ func parseOriginHost(origin string) string {
 	return hostPort
 }
 
-func (s *Server) handleTrackingPixel(w http.ResponseWriter, r *http.Request, token string) {
+func (s *Server) handleKeepAlive(w http.ResponseWriter, r *http.Request, token string) {
 	// Only allow GET requests
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// Mark email as opened
-	if err := s.store.MarkEmailOpened(token); err != nil {
-		// Log but still return pixel (don't leak token validity)
-		s.logger.Debug("tracking pixel error", "token", token, "err", err)
+	// Update last_active_at for this config
+	if err := s.store.UpdateLastActive(token); err != nil {
+		s.logger.Debug("keep-alive error", "token", token, "err", err)
+		http.Error(w, "Invalid or expired link", http.StatusNotFound)
+		return
 	}
 
-	// Return 1x1 transparent GIF
-	w.Header().Set("Content-Type", "image/gif")
-	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
-	w.Header().Set("Pragma", "no-cache")
-	w.Header().Set("Expires", "0")
-	
-	// 1x1 transparent GIF (base64 decoded: R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7)
-	gifBytes := []byte{
-		0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x01, 0x00,
-		0x01, 0x00, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00,
-		0xFF, 0xFF, 0xFF, 0x21, 0xF9, 0x04, 0x01, 0x00,
-		0x00, 0x00, 0x00, 0x2C, 0x00, 0x00, 0x00, 0x00,
-		0x01, 0x00, 0x01, 0x00, 0x00, 0x02, 0x02, 0x44,
-		0x01, 0x00, 0x3B,
-	}
-	w.Write(gifBytes)
+	// Calculate new expiry date (90 days from now)
+	expiresAt := time.Now().AddDate(0, 0, 90).Format("January 2, 2006")
+
+	// Return success message
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprintf(w, `<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Digest Active</title>
+	<style>
+		body { font-family: system-ui, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; text-align: center; }
+		.success { color: #059669; font-size: 24px; margin-bottom: 20px; }
+		.details { color: #6b7280; font-size: 16px; }
+	</style>
+</head>
+<body>
+	<div class="success">✓ Success!</div>
+	<div class="details">Your digest will stay active until <strong>%s</strong>.</div>
+</body>
+</html>`, expiresAt)
 }
 
 func (s *Server) handle404(w http.ResponseWriter, r *http.Request) {

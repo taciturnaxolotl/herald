@@ -150,29 +150,36 @@ func (m *Mailer) ValidateConfig() error {
 	return client.Quit()
 }
 
-func (m *Mailer) Send(to, subject, htmlBody, textBody, unsubToken, dashboardURL, trackingToken string) error {
+func (m *Mailer) Send(to, subject, htmlBody, textBody, unsubToken, dashboardURL, keepAliveURL string) error {
 	addr := net.JoinHostPort(m.cfg.Host, fmt.Sprintf("%d", m.cfg.Port))
 
 	boundary := "==herald-boundary-a1b2c3d4e5f6=="
 
-	// Add footer with unsubscribe and dashboard links
+	// Add footer with keep-alive, unsubscribe, and dashboard links
 	var htmlFooter strings.Builder
 	var textFooter strings.Builder
 
-	if unsubToken != "" || dashboardURL != "" {
+	if keepAliveURL != "" || unsubToken != "" || dashboardURL != "" {
 		htmlFooter.WriteString(`<hr><p style="font-size: 12px; color: #666;">`)
 		textFooter.WriteString("\n\n---\n")
 
+		if keepAliveURL != "" {
+			htmlFooter.WriteString(fmt.Sprintf(`<a href="%s">keep this digest active</a>`, keepAliveURL))
+			textFooter.WriteString(fmt.Sprintf("keep this digest active: %s\n", keepAliveURL))
+		}
+
 		if dashboardURL != "" {
+			if keepAliveURL != "" {
+				htmlFooter.WriteString(" • ")
+			}
 			htmlFooter.WriteString(fmt.Sprintf(`<a href="%s">profile</a>`, dashboardURL))
 			textFooter.WriteString(fmt.Sprintf("profile: %s\n", dashboardURL))
 		}
 
 		if unsubToken != "" {
 			unsubURL := m.unsubBaseURL + "/unsubscribe/" + unsubToken
-			if dashboardURL != "" {
+			if dashboardURL != "" || keepAliveURL != "" {
 				htmlFooter.WriteString(" • ")
-				textFooter.WriteString("")
 			}
 			htmlFooter.WriteString(fmt.Sprintf(`<a href="%s">unsubscribe</a>`, unsubURL))
 			textFooter.WriteString(fmt.Sprintf("unsubscribe: %s\n", unsubURL))
@@ -223,15 +230,7 @@ func (m *Mailer) Send(to, subject, htmlBody, textBody, unsubToken, dashboardURL,
 	msg.WriteString(fmt.Sprintf("--%s\r\n", boundary))
 	msg.WriteString("Content-Type: text/html; charset=utf-8\r\n")
 	msg.WriteString("Content-Transfer-Encoding: quoted-printable\r\n\r\n")
-	
-	// Add tracking pixel if token provided
-	htmlBodyWithTracking := htmlBody
-	if trackingToken != "" {
-		trackingURL := m.unsubBaseURL + "/t/" + trackingToken + ".gif"
-		htmlBodyWithTracking = htmlBody + fmt.Sprintf(`<img src="%s" width="1" height="1" alt="" style="display:none;">`, trackingURL)
-	}
-	
-	htmlQP := encodeQuotedPrintable(htmlBodyWithTracking)
+	htmlQP := encodeQuotedPrintable(htmlBody)
 	msg.WriteString(htmlQP)
 	msg.WriteString("\r\n")
 

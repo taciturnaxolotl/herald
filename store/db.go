@@ -70,6 +70,7 @@ func (db *DB) migrate() error {
 		last_run DATETIME,
 		next_run DATETIME,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		last_active_at DATETIME,
 		UNIQUE(user_id, filename)
 	);
 
@@ -176,7 +177,7 @@ func (db *DB) prepareStatements() error {
 	}
 
 	db.stmts.getConfig, err = db.Prepare(
-		`SELECT id, user_id, filename, email, cron_expr, digest, inline_content, raw_text, last_run, next_run, created_at
+		`SELECT id, user_id, filename, email, cron_expr, digest, inline_content, raw_text, last_run, next_run, created_at, last_active_at
 		 FROM configs WHERE user_id = ? AND filename = ?`)
 	if err != nil {
 		return fmt.Errorf("prepare getConfig: %w", err)

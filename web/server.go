@@ -150,10 +150,8 @@ func (s *Server) routeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if len(parts) == 2 && parts[0] == "t" && strings.HasSuffix(parts[1], ".gif") {
-		// Tracking pixel: /t/{token}.gif
-		token := strings.TrimSuffix(parts[1], ".gif")
-		s.handleTrackingPixel(w, r, token)
+	if len(parts) == 2 && parts[0] == "keep-alive" {
+		s.handleKeepAlive(w, r, parts[1])
 		return
 	}
 

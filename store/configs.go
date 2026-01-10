@@ -21,6 +21,7 @@ type Config struct {
 	LastRun       sql.NullTime
 	NextRun       sql.NullTime
 	CreatedAt     time.Time
+	LastActiveAt  sql.NullTime
 }
 
 func (db *DB) CreateConfig(ctx context.Context, userID int64, filename, email, cronExpr string, digest, inline bool, rawText string, nextRun time.Time) (*Config, error) {
@@ -102,7 +103,7 @@ func (db *DB) DeleteConfigTx(ctx context.Context, tx *sql.Tx, userID int64, file
 
 func (db *DB) GetConfig(ctx context.Context, userID int64, filename string) (*Config, error) {
 	var cfg Config
-	err := db.stmts.getConfig.QueryRowContext(ctx, userID, filename).Scan(&cfg.ID, &cfg.UserID, &cfg.Filename, &cfg.Email, &cfg.CronExpr, &cfg.Digest, &cfg.InlineContent, &cfg.RawText, &cfg.LastRun, &cfg.NextRun, &cfg.CreatedAt)
+	err := db.stmts.getConfig.QueryRowContext(ctx, userID, filename).Scan(&cfg.ID, &cfg.UserID, &cfg.Filename, &cfg.Email, &cfg.CronExpr, &cfg.Digest, &cfg.InlineContent, &cfg.RawText, &cfg.LastRun, &cfg.NextRun, &cfg.CreatedAt, &cfg.LastActiveAt)
 	if err != nil {
 		return nil, err
 	}
@@ -112,10 +113,10 @@ func (db *DB) GetConfig(ctx context.Context, userID int64, filename string) (*Co
 func (db *DB) GetConfigByID(ctx context.Context, id int64) (*Config, error) {
 	var cfg Config
 	err := db.QueryRowContext(ctx,
-		`SELECT id, user_id, filename, email, cron_expr, digest, inline_content, raw_text, last_run, next_run, created_at
+		`SELECT id, user_id, filename, email, cron_expr, digest, inline_content, raw_text, last_run, next_run, created_at, last_active_at
 		 FROM configs WHERE id = ?`,
 		id,
-	).Scan(&cfg.ID, &cfg.UserID, &cfg.Filename, &cfg.Email, &cfg.CronExpr, &cfg.Digest, &cfg.InlineContent, &cfg.RawText, &cfg.LastRun, &cfg.NextRun, &cfg.CreatedAt)
+	).Scan(&cfg.ID, &cfg.UserID, &cfg.Filename, &cfg.Email, &cfg.CronExpr, &cfg.Digest, &cfg.InlineContent, &cfg.RawText, &cfg.LastRun, &cfg.NextRun, &cfg.CreatedAt, &cfg.LastActiveAt)
 	if err != nil {
 		return nil, err
 	}
@@ -124,7 +125,7 @@ func (db *DB) GetConfigByID(ctx context.Context, id int64) (*Config, error) {
 
 func (db *DB) ListConfigs(ctx context.Context, userID int64) ([]*Config, error) {
 	rows, err := db.QueryContext(ctx,
-		`SELECT id, user_id, filename, email, cron_expr, digest, inline_content, raw_text, last_run, next_run, created_at
+		`SELECT id, user_id, filename, email, cron_expr, digest, inline_content, raw_text, last_run, next_run, created_at, last_active_at
 		 FROM configs WHERE user_id = ? ORDER BY filename`,
 		userID,
 	)
@@ -136,7 +137,7 @@ func (db *DB) ListConfigs(ctx context.Context, userID int64) ([]*Config, error) 
 	var configs []*Config
 	for rows.Next() {
 		var cfg Config
-		if err := rows.Scan(&cfg.ID, &cfg.UserID, &cfg.Filename, &cfg.Email, &cfg.CronExpr, &cfg.Digest, &cfg.InlineContent, &cfg.RawText, &cfg.LastRun, &cfg.NextRun, &cfg.CreatedAt); err != nil {
+		if err := rows.Scan(&cfg.ID, &cfg.UserID, &cfg.Filename, &cfg.Email, &cfg.CronExpr, &cfg.Digest, &cfg.InlineContent, &cfg.RawText, &cfg.LastRun, &cfg.NextRun, &cfg.CreatedAt, &cfg.LastActiveAt); err != nil {
 			return nil, fmt.Errorf("scan config: %w", err)
 		}
 		configs = append(configs, &cfg)
@@ -173,7 +174,7 @@ func (db *DB) UpdateLastRun(ctx context.Context, configID int64, lastRun, nextRu
 
 func (db *DB) GetDueConfigs(ctx context.Context, now time.Time) ([]*Config, error) {
 	rows, err := db.QueryContext(ctx,
-		`SELECT id, user_id, filename, email, cron_expr, digest, inline_content, raw_text, last_run, next_run, created_at
+		`SELECT id, user_id, filename, email, cron_expr, digest, inline_content, raw_text, last_run, next_run, created_at, last_active_at
 		 FROM configs WHERE next_run IS NOT NULL AND next_run <= ? ORDER BY next_run`,
 		now,
 	)
@@ -185,7 +186,7 @@ func (db *DB) GetDueConfigs(ctx context.Context, now time.Time) ([]*Config, erro
 	var configs []*Config
 	for rows.Next() {
 		var cfg Config
-		if err := rows.Scan(&cfg.ID, &cfg.UserID, &cfg.Filename, &cfg.Email, &cfg.CronExpr, &cfg.Digest, &cfg.InlineContent, &cfg.RawText, &cfg.LastRun, &cfg.NextRun, &cfg.CreatedAt); err != nil {
+		if err := rows.Scan(&cfg.ID, &cfg.UserID, &cfg.Filename, &cfg.Email, &cfg.CronExpr, &cfg.Digest, &cfg.InlineContent, &cfg.RawText, &cfg.LastRun, &cfg.NextRun, &cfg.CreatedAt, &cfg.LastActiveAt); err != nil {
 			return nil, fmt.Errorf("scan config: %w", err)
 		}
 		configs = append(configs, &cfg)
