@@ -127,18 +127,52 @@ func handleRun(ctx context.Context, sess ssh.Session, user *store.User, st *stor
 		return
 	}
 
-	fmt.Fprintln(sess, "Running "+filename+"...")
+	// Simple spinner animation
+	spinChars := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+	done := make(chan struct{})
+	result := make(chan struct {
+		items int
+		err   error
+	})
 
-	newItems, err := sched.RunNow(ctx, cfg.ID)
-	if err != nil {
-		fmt.Fprintln(sess, errorStyle.Render("Error: "+err.Error()))
+	// Spinner goroutine
+	go func() {
+		i := 0
+		for {
+			select {
+			case <-done:
+				return
+			default:
+				fmt.Fprintf(sess, "\r%s Fetching feeds...", spinChars[i%len(spinChars)])
+				i++
+				time.Sleep(80 * time.Millisecond)
+			}
+		}
+	}()
+
+	// Work goroutine
+	go func() {
+		newItems, err := sched.RunNow(ctx, cfg.ID)
+		result <- struct {
+			items int
+			err   error
+		}{items: newItems, err: err}
+	}()
+
+	// Wait for result
+	res := <-result
+	close(done)
+	fmt.Fprint(sess, "\r\033[K") // Clear the spinner line
+
+	if res.err != nil {
+		fmt.Fprintln(sess, errorStyle.Render("Error: "+res.err.Error()))
 		return
 	}
 
-	if newItems == 0 {
+	if res.items == 0 {
 		fmt.Fprintln(sess, dimStyle.Render("No new items found."))
 	} else {
-		fmt.Fprintln(sess, successStyle.Render(fmt.Sprintf("Sent %d new item(s) to %s", newItems, cfg.Email)))
+		fmt.Fprintln(sess, successStyle.Render(fmt.Sprintf("Sent %d new item(s) to %s", res.items, cfg.Email)))
 	}
 }
 
