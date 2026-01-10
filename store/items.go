@@ -26,11 +26,7 @@ func (db *DB) MarkItemSeen(ctx context.Context, feedID int64, guid, title, link 
 		linkVal = sql.NullString{String: link, Valid: true}
 	}
 
-	_, err := db.ExecContext(ctx,
-		`INSERT INTO seen_items (feed_id, guid, title, link) VALUES (?, ?, ?, ?)
-		 ON CONFLICT(feed_id, guid) DO UPDATE SET title = excluded.title, link = excluded.link`,
-		feedID, guid, titleVal, linkVal,
-	)
+	_, err := db.stmts.markItemSeen.ExecContext(ctx, feedID, guid, titleVal, linkVal)
 	if err != nil {
 		return fmt.Errorf("mark item seen: %w", err)
 	}
@@ -39,10 +35,7 @@ func (db *DB) MarkItemSeen(ctx context.Context, feedID int64, guid, title, link 
 
 func (db *DB) IsItemSeen(ctx context.Context, feedID int64, guid string) (bool, error) {
 	var id int64
-	err := db.QueryRowContext(ctx,
-		`SELECT id FROM seen_items WHERE feed_id = ? AND guid = ?`,
-		feedID, guid,
-	).Scan(&id)
+	err := db.stmts.isItemSeen.QueryRowContext(ctx, feedID, guid).Scan(&id)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return false, nil
@@ -73,11 +66,7 @@ func (db *DB) MarkItemSeenTx(ctx context.Context, tx *sql.Tx, feedID int64, guid
 }
 
 func (db *DB) GetSeenItems(ctx context.Context, feedID int64, limit int) ([]*SeenItem, error) {
-	rows, err := db.QueryContext(ctx,
-		`SELECT id, feed_id, guid, title, link, seen_at
-		 FROM seen_items WHERE feed_id = ? ORDER BY seen_at DESC LIMIT ?`,
-		feedID, limit,
-	)
+	rows, err := db.stmts.getSeenItems.QueryContext(ctx, feedID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("query seen items: %w", err)
 	}
@@ -138,10 +127,7 @@ func (db *DB) GetSeenGUIDs(ctx context.Context, feedID int64, guids []string) (m
 // CleanupOldSeenItems deletes seen items older than the specified duration
 func (db *DB) CleanupOldSeenItems(ctx context.Context, olderThan time.Duration) (int64, error) {
 	cutoff := time.Now().Add(-olderThan)
-	result, err := db.ExecContext(ctx,
-		`DELETE FROM seen_items WHERE seen_at < ?`,
-		cutoff,
-	)
+	result, err := db.stmts.cleanupSeenItems.ExecContext(ctx, cutoff)
 	if err != nil {
 		return 0, fmt.Errorf("cleanup old seen items: %w", err)
 	}

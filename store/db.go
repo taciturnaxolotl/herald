@@ -10,6 +10,17 @@ import (
 
 type DB struct {
 	*sql.DB
+	stmts *preparedStmts
+}
+
+type preparedStmts struct {
+	markItemSeen     *sql.Stmt
+	isItemSeen       *sql.Stmt
+	getSeenItems     *sql.Stmt
+	getConfig        *sql.Stmt
+	updateConfigRun  *sql.Stmt
+	updateFeedMeta   *sql.Stmt
+	cleanupSeenItems *sql.Stmt
 }
 
 func Open(path string) (*DB, error) {
@@ -26,9 +37,13 @@ func Open(path string) (*DB, error) {
 		return nil, fmt.Errorf("ping database: %w", err)
 	}
 
-	store := &DB{db}
+	store := &DB{DB: db}
 	if err := store.migrate(); err != nil {
 		return nil, fmt.Errorf("migrate database: %w", err)
+	}
+
+	if err := store.prepareStatements(); err != nil {
+		return nil, fmt.Errorf("prepare statements: %w", err)
 	}
 
 	return store, nil
@@ -107,7 +122,69 @@ func (db *DB) migrate() error {
 }
 
 func (db *DB) Close() error {
+	if db.stmts != nil {
+		db.stmts.markItemSeen.Close()
+		db.stmts.isItemSeen.Close()
+		db.stmts.getSeenItems.Close()
+		db.stmts.getConfig.Close()
+		db.stmts.updateConfigRun.Close()
+		db.stmts.updateFeedMeta.Close()
+		db.stmts.cleanupSeenItems.Close()
+	}
 	return db.DB.Close()
+}
+
+func (db *DB) prepareStatements() error {
+	db.stmts = &preparedStmts{}
+
+	var err error
+
+	db.stmts.markItemSeen, err = db.Prepare(
+		`INSERT INTO seen_items (feed_id, guid, title, link) VALUES (?, ?, ?, ?)
+		 ON CONFLICT(feed_id, guid) DO UPDATE SET title = excluded.title, link = excluded.link`)
+	if err != nil {
+		return fmt.Errorf("prepare markItemSeen: %w", err)
+	}
+
+	db.stmts.isItemSeen, err = db.Prepare(
+		`SELECT id FROM seen_items WHERE feed_id = ? AND guid = ?`)
+	if err != nil {
+		return fmt.Errorf("prepare isItemSeen: %w", err)
+	}
+
+	db.stmts.getSeenItems, err = db.Prepare(
+		`SELECT id, feed_id, guid, title, link, seen_at
+		 FROM seen_items WHERE feed_id = ? ORDER BY seen_at DESC LIMIT ?`)
+	if err != nil {
+		return fmt.Errorf("prepare getSeenItems: %w", err)
+	}
+
+	db.stmts.getConfig, err = db.Prepare(
+		`SELECT id, user_id, filename, email, cron_expr, digest, inline_content, raw_text, last_run, next_run, created_at
+		 FROM configs WHERE user_id = ? AND filename = ?`)
+	if err != nil {
+		return fmt.Errorf("prepare getConfig: %w", err)
+	}
+
+	db.stmts.updateConfigRun, err = db.Prepare(
+		`UPDATE configs SET last_run = ?, next_run = ? WHERE id = ?`)
+	if err != nil {
+		return fmt.Errorf("prepare updateConfigRun: %w", err)
+	}
+
+	db.stmts.updateFeedMeta, err = db.Prepare(
+		`UPDATE feeds SET last_fetched = ?, etag = ?, last_modified = ? WHERE id = ?`)
+	if err != nil {
+		return fmt.Errorf("prepare updateFeedMeta: %w", err)
+	}
+
+	db.stmts.cleanupSeenItems, err = db.Prepare(
+		`DELETE FROM seen_items WHERE seen_at < ?`)
+	if err != nil {
+		return fmt.Errorf("prepare cleanupSeenItems: %w", err)
+	}
+
+	return nil
 }
 
 func (db *DB) Migrate(ctx context.Context) error {

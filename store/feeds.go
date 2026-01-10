@@ -142,10 +142,7 @@ func (db *DB) UpdateFeedFetched(ctx context.Context, feedID int64, etag, lastMod
 		lmVal = sql.NullString{String: lastModified, Valid: true}
 	}
 
-	_, err := db.ExecContext(ctx,
-		`UPDATE feeds SET last_fetched = ?, etag = ?, last_modified = ? WHERE id = ?`,
-		time.Now(), etagVal, lmVal, feedID,
-	)
+	_, err := db.stmts.updateFeedMeta.ExecContext(ctx, time.Now(), etagVal, lmVal, feedID)
 	if err != nil {
 		return fmt.Errorf("update feed fetched: %w", err)
 	}

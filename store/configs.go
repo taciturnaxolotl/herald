@@ -102,11 +102,7 @@ func (db *DB) DeleteConfigTx(ctx context.Context, tx *sql.Tx, userID int64, file
 
 func (db *DB) GetConfig(ctx context.Context, userID int64, filename string) (*Config, error) {
 	var cfg Config
-	err := db.QueryRowContext(ctx,
-		`SELECT id, user_id, filename, email, cron_expr, digest, inline_content, raw_text, last_run, next_run, created_at
-		 FROM configs WHERE user_id = ? AND filename = ?`,
-		userID, filename,
-	).Scan(&cfg.ID, &cfg.UserID, &cfg.Filename, &cfg.Email, &cfg.CronExpr, &cfg.Digest, &cfg.InlineContent, &cfg.RawText, &cfg.LastRun, &cfg.NextRun, &cfg.CreatedAt)
+	err := db.stmts.getConfig.QueryRowContext(ctx, userID, filename).Scan(&cfg.ID, &cfg.UserID, &cfg.Filename, &cfg.Email, &cfg.CronExpr, &cfg.Digest, &cfg.InlineContent, &cfg.RawText, &cfg.LastRun, &cfg.NextRun, &cfg.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -168,10 +164,7 @@ func (db *DB) DeleteConfig(ctx context.Context, userID int64, filename string) e
 }
 
 func (db *DB) UpdateLastRun(ctx context.Context, configID int64, lastRun, nextRun time.Time) error {
-	_, err := db.ExecContext(ctx,
-		`UPDATE configs SET last_run = ?, next_run = ? WHERE id = ?`,
-		lastRun, nextRun, configID,
-	)
+	_, err := db.stmts.updateConfigRun.ExecContext(ctx, lastRun, nextRun, configID)
 	if err != nil {
 		return fmt.Errorf("update last run: %w", err)
 	}

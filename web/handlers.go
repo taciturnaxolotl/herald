@@ -170,6 +170,11 @@ type rssItem struct {
 	PubDate string `xml:"pubDate"`
 }
 
+type rssItemWithTime struct {
+	rssItem
+	parsedTime time.Time
+}
+
 type rssChannel struct {
 	Title       string    `xml:"title"`
 	Link        string    `xml:"link"`
@@ -208,7 +213,7 @@ func (s *Server) handleFeedXML(w http.ResponseWriter, r *http.Request, fingerpri
 		return
 	}
 
-	var items []rssItem
+	var items []rssItemWithTime
 	feeds, err := s.store.GetFeedsByConfig(ctx, cfg.ID)
 	if err != nil {
 		s.logger.Error("get feeds", "err", err)
@@ -222,9 +227,12 @@ func (s *Server) handleFeedXML(w http.ResponseWriter, r *http.Request, fingerpri
 			continue
 		}
 		for _, item := range seenItems {
-			rItem := rssItem{
-				GUID:    item.GUID,
-				PubDate: item.SeenAt.Format(time.RFC1123Z),
+			rItem := rssItemWithTime{
+				rssItem: rssItem{
+					GUID:    item.GUID,
+					PubDate: item.SeenAt.Format(time.RFC1123Z),
+				},
+				parsedTime: item.SeenAt,
 			}
 			if item.Title.Valid {
 				rItem.Title = item.Title.String
@@ -237,13 +245,17 @@ func (s *Server) handleFeedXML(w http.ResponseWriter, r *http.Request, fingerpri
 	}
 
 	sort.Slice(items, func(i, j int) bool {
-		ti, _ := time.Parse(time.RFC1123Z, items[i].PubDate)
-		tj, _ := time.Parse(time.RFC1123Z, items[j].PubDate)
-		return ti.After(tj)
+		return items[i].parsedTime.After(items[j].parsedTime)
 	})
 
 	if len(items) > 100 {
 		items = items[:100]
+	}
+
+	// Convert to rssItem for XML encoding
+	rssItems := make([]rssItem, len(items))
+	for i, item := range items {
+		rssItems[i] = item.rssItem
 	}
 
 	feed := rssFeed{
@@ -252,11 +264,33 @@ func (s *Server) handleFeedXML(w http.ResponseWriter, r *http.Request, fingerpri
 			Title:       "Herald - " + configFilename,
 			Link:        s.origin + "/" + fingerprint + "/" + configFilename,
 			Description: "Feed for " + configFilename,
-			Items:       items,
+			Items:       rssItems,
 		},
 	}
 
+	// Add caching headers
 	w.Header().Set("Content-Type", "application/rss+xml; charset=utf-8")
+	w.Header().Set("Cache-Control", "public, max-age=300")
+	if cfg.LastRun.Valid {
+		etag := fmt.Sprintf(`"%s-%d"`, fingerprint[:8], cfg.LastRun.Time.Unix())
+		w.Header().Set("ETag", etag)
+		w.Header().Set("Last-Modified", cfg.LastRun.Time.UTC().Format(http.TimeFormat))
+		
+		// Check If-None-Match
+		if match := r.Header.Get("If-None-Match"); match == etag {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		
+		// Check If-Modified-Since
+		if modSince := r.Header.Get("If-Modified-Since"); modSince != "" {
+			if t, err := http.ParseTime(modSince); err == nil && !cfg.LastRun.Time.After(t) {
+				w.WriteHeader(http.StatusNotModified)
+				return
+			}
+		}
+	}
+	
 	w.Write([]byte(xml.Header))
 	enc := xml.NewEncoder(w)
 	enc.Indent("", "  ")
@@ -276,6 +310,11 @@ type jsonFeedItem struct {
 	URL           string `json:"url,omitempty"`
 	Title         string `json:"title,omitempty"`
 	DatePublished string `json:"date_published"`
+}
+
+type jsonFeedItemWithTime struct {
+	jsonFeedItem
+	parsedTime time.Time
 }
 
 func (s *Server) handleFeedJSON(w http.ResponseWriter, r *http.Request, fingerprint, configFilename string) {
@@ -303,7 +342,7 @@ func (s *Server) handleFeedJSON(w http.ResponseWriter, r *http.Request, fingerpr
 		return
 	}
 
-	var items []jsonFeedItem
+	var items []jsonFeedItemWithTime
 	feeds, err := s.store.GetFeedsByConfig(ctx, cfg.ID)
 	if err != nil {
 		s.logger.Error("get feeds", "err", err)
@@ -317,9 +356,12 @@ func (s *Server) handleFeedJSON(w http.ResponseWriter, r *http.Request, fingerpr
 			continue
 		}
 		for _, item := range seenItems {
-			jItem := jsonFeedItem{
-				ID:            item.GUID,
-				DatePublished: item.SeenAt.Format(time.RFC3339),
+			jItem := jsonFeedItemWithTime{
+				jsonFeedItem: jsonFeedItem{
+					ID:            item.GUID,
+					DatePublished: item.SeenAt.Format(time.RFC3339),
+				},
+				parsedTime: item.SeenAt,
 			}
 			if item.Title.Valid {
 				jItem.Title = item.Title.String
@@ -332,13 +374,17 @@ func (s *Server) handleFeedJSON(w http.ResponseWriter, r *http.Request, fingerpr
 	}
 
 	sort.Slice(items, func(i, j int) bool {
-		ti, _ := time.Parse(time.RFC3339, items[i].DatePublished)
-		tj, _ := time.Parse(time.RFC3339, items[j].DatePublished)
-		return ti.After(tj)
+		return items[i].parsedTime.After(items[j].parsedTime)
 	})
 
 	if len(items) > 100 {
 		items = items[:100]
+	}
+
+	// Convert to jsonFeedItem for JSON encoding
+	jsonItems := make([]jsonFeedItem, len(items))
+	for i, item := range items {
+		jsonItems[i] = item.jsonFeedItem
 	}
 
 	feed := jsonFeed{
@@ -346,10 +392,32 @@ func (s *Server) handleFeedJSON(w http.ResponseWriter, r *http.Request, fingerpr
 		Title:       "Herald - " + configFilename,
 		HomePageURL: s.origin + "/" + fingerprint + "/" + configFilename,
 		FeedURL:     s.origin + "/" + fingerprint + "/" + configFilename + ".json",
-		Items:       items,
+		Items:       jsonItems,
 	}
 
+	// Add caching headers
 	w.Header().Set("Content-Type", "application/feed+json; charset=utf-8")
+	w.Header().Set("Cache-Control", "public, max-age=300")
+	if cfg.LastRun.Valid {
+		etag := fmt.Sprintf(`"%s-%d"`, fingerprint[:8], cfg.LastRun.Time.Unix())
+		w.Header().Set("ETag", etag)
+		w.Header().Set("Last-Modified", cfg.LastRun.Time.UTC().Format(http.TimeFormat))
+		
+		// Check If-None-Match
+		if match := r.Header.Get("If-None-Match"); match == etag {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		
+		// Check If-Modified-Since
+		if modSince := r.Header.Get("If-Modified-Since"); modSince != "" {
+			if t, err := http.ParseTime(modSince); err == nil && !cfg.LastRun.Time.After(t) {
+				w.WriteHeader(http.StatusNotModified)
+				return
+			}
+		}
+	}
+	
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	enc.Encode(feed)
