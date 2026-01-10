@@ -1,5 +1,7 @@
 # Herald 🎏
 
+![email from harold](https://l4.dunkirk.sh/i/Ck271POS5n0k.webp)
+
 This was inspired by the sunsetting of [pico.sh/feeds](https://blog.pico.sh/ann-033-moving-rss-to-email-pico-plus) being available outside of `pico+`. It is a totally understandable move from them as their email costs were skyrocketing and they needed to pay for it somehow. This was created to allow me to still get my rss feeds delivered to me each day by email which I have grown quite accustomed to. The config is completely compatible with the `pico.sh` format as of `2026-01-09` and should stay fairly stable. It is also configured over ssh with the slight addition that you can view your feeds on a website as well as I found myself wanting to hot load my feeds into my website :)
 
 The canonical repo for this is hosted on tangled over at [`dunkirk.sh/herald`](https://tangled.org/@dunkirk.sh/herald)
@@ -27,7 +29,7 @@ Create a `feeds.txt` file:
 =: email you@example.com
 =: cron 0 8 * * *
 =: digest true
-=> https://blog.example.com/rss
+=> https://dunkirk.sh/atom.xml
 => https://news.ycombinator.com/rss
 => https://lobste.rs/rss "Lobsters"
 ```
@@ -35,26 +37,26 @@ Create a `feeds.txt` file:
 Upload via SCP:
 
 ```bash
-scp feeds.txt user@herald.example.com:
+scp feeds.txt user@herald.dunkirk.sh:
 ```
 
 ### SSH Commands
 
 ```bash
 # List your configs
-ssh herald.example.com ls
+ssh herald.dunkirk.sh ls
 
 # Show config contents
-ssh herald.example.com cat feeds.txt
+ssh herald.dunkirk.sh cat feeds.txt
 
 # Delete a config
-ssh herald.example.com rm feeds.txt
+ssh herald.dunkirk.sh rm feeds.txt
 
 # Run immediately (don't wait for cron)
-ssh herald.example.com run feeds.txt
+ssh herald.dunkirk.sh run feeds.txt
 
 # Show recent activity
-ssh herald.example.com logs
+ssh herald.dunkirk.sh logs
 ```
 
 ### Web Interface
