@@ -1,0 +1,53 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+html, body {
+    font-family: monospace;
+    background: #0a0a0a;
+    color: #e0e0e0;
+}
+body {
+    max-width: 80ch;
+    margin: 2rem auto;
+    padding: 1rem;
+    line-height: 1.5;
+}
+a {
+    color: #8ab4f8;
+    text-decoration: underline;
+}
+a:hover {
+    color: #fff;
+}
+pre {
+    white-space: pre-wrap;
+    margin: 1rem 0;
+}
+h1 {
+    font-weight: bold;
+    font-size: 1rem;
+    border-bottom: 2px solid #333;
+    padding-bottom: 0.5rem;
+    margin-bottom: 1rem;
+}
+h2 {
+    font-weight: bold;
+    font-size: 1rem;
+    margin-top: 1.5rem;
+    margin-bottom: 0.5rem;
+}
+p {
+    margin: 0.5rem 0;
+}
+ul {
+    list-style: none;
+    margin: 0.5rem 0 1rem 2rem;
+}
+li {
+    margin: 0.25rem 0;
+}
+strong {
+    font-weight: bold;
+}

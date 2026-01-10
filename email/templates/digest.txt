@@ -1,0 +1,15 @@
+{{range .FeedGroups}}
+{{.FeedName}}
+{{.FeedURL}}
+
+Summary
+
+{{range .Items}}
+{{.Title}}
+{{.Link}}
+{{if and $.Inline .Content}}
+{{.Content}}
+
+{{end}}
+{{end}}
+{{end}}

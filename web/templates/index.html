@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>HERALD</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<h1>HERALD</h1>
+
+<h2>NAME</h2>
+<pre>
+    herald - RSS-to-Email via SSH
+</pre>
+
+<h2>COMMANDS</h2>
+<pre>
+    ls              List uploaded feed configs
+    cat &lt;file&gt;      Display config file contents
+    rm &lt;file&gt;       Delete a config file
+    run &lt;file&gt;      Manually trigger feed fetch and email
+    logs            View recent delivery logs
+</pre>
+
+<h2>EXAMPLES</h2>
+<pre>
+    # Upload a config
+    scp {{if ne .SSHPort 22}}-P {{.SSHPort}} {{end}}feeds.txt herald@{{.SSHHost}}:
+
+    # Check status
+    ssh {{if ne .SSHPort 22}}-p {{.SSHPort}} {{end}}herald@{{.SSHHost}} ls
+
+    # View config
+    ssh {{if ne .SSHPort 22}}-p {{.SSHPort}} {{end}}herald@{{.SSHHost}} cat feeds.txt
+
+    # Manual run
+    ssh {{if ne .SSHPort 22}}-p {{.SSHPort}} {{end}}herald@{{.SSHHost}} run feeds.txt
+</pre>
+</body>
+</html>

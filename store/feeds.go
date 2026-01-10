@@ -1,0 +1,97 @@
+package store
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"time"
+)
+
+type Feed struct {
+	ID           int64
+	ConfigID     int64
+	URL          string
+	Name         sql.NullString
+	LastFetched  sql.NullTime
+	ETag         sql.NullString
+	LastModified sql.NullString
+}
+
+func (db *DB) CreateFeed(ctx context.Context, configID int64, url, name string) (*Feed, error) {
+	var nameVal sql.NullString
+	if name != "" {
+		nameVal = sql.NullString{String: name, Valid: true}
+	}
+
+	result, err := db.ExecContext(ctx,
+		`INSERT INTO feeds (config_id, url, name) VALUES (?, ?, ?)`,
+		configID, url, nameVal,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("insert feed: %w", err)
+	}
+
+	id, err := result.LastInsertId()
+	if err != nil {
+		return nil, fmt.Errorf("get last insert id: %w", err)
+	}
+
+	return &Feed{
+		ID:       id,
+		ConfigID: configID,
+		URL:      url,
+		Name:     nameVal,
+	}, nil
+}
+
+func (db *DB) GetFeedsByConfig(ctx context.Context, configID int64) ([]*Feed, error) {
+	rows, err := db.QueryContext(ctx,
+		`SELECT id, config_id, url, name, last_fetched, etag, last_modified
+		 FROM feeds WHERE config_id = ? ORDER BY id`,
+		configID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query feeds: %w", err)
+	}
+	defer rows.Close()
+
+	var feeds []*Feed
+	for rows.Next() {
+		var f Feed
+		if err := rows.Scan(&f.ID, &f.ConfigID, &f.URL, &f.Name, &f.LastFetched, &f.ETag, &f.LastModified); err != nil {
+			return nil, fmt.Errorf("scan feed: %w", err)
+		}
+		feeds = append(feeds, &f)
+	}
+	return feeds, rows.Err()
+}
+
+func (db *DB) UpdateFeedFetched(ctx context.Context, feedID int64, etag, lastModified string) error {
+	var etagVal, lmVal sql.NullString
+	if etag != "" {
+		etagVal = sql.NullString{String: etag, Valid: true}
+	}
+	if lastModified != "" {
+		lmVal = sql.NullString{String: lastModified, Valid: true}
+	}
+
+	_, err := db.ExecContext(ctx,
+		`UPDATE feeds SET last_fetched = ?, etag = ?, last_modified = ? WHERE id = ?`,
+		time.Now(), etagVal, lmVal, feedID,
+	)
+	if err != nil {
+		return fmt.Errorf("update feed fetched: %w", err)
+	}
+	return nil
+}
+
+func (db *DB) DeleteFeedsByConfig(ctx context.Context, configID int64) error {
+	_, err := db.ExecContext(ctx,
+		`DELETE FROM feeds WHERE config_id = ?`,
+		configID,
+	)
+	if err != nil {
+		return fmt.Errorf("delete feeds: %w", err)
+	}
+	return nil
+}

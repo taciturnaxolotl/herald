@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+body {
+    font-family: monospace;
+    background-color: #fff;
+    color: #000;
+    margin: 0;
+    padding: 20px;
+    line-height: 1.6;
+    max-width: 600px;
+}
+a {
+    color: #000;
+    word-wrap: break-word;
+}
+h2 {
+    font-size: 16px;
+    font-weight: bold;
+    margin: 20px 0 5px 0;
+}
+h3 {
+    font-size: 14px;
+    font-weight: bold;
+    margin: 15px 0 10px 0;
+}
+.feed-url {
+    font-size: 14px;
+    margin-bottom: 10px;
+}
+.item {
+    margin-bottom: 20px;
+}
+.item-title {
+    font-weight: bold;
+    margin-bottom: 5px;
+}
+.item-content {
+    margin-top: 10px;
+    white-space: pre-wrap;
+}
+</style>
+</head>
+<body>
+{{range .FeedGroups}}
+<h2>{{.FeedName}}</h2>
+<div class="feed-url"><a href="{{.FeedURL}}">{{.FeedURL}}</a></div>
+
+<h3>Summary</h3>
+
+{{range .Items}}
+<div class="item">
+<div class="item-title">{{.Title}}</div>
+<div><a href="{{.Link}}">{{.Link}}</a></div>
+{{if and $.Inline .Content}}
+<div class="item-content">{{.Content}}</div>
+{{end}}
+</div>
+{{end}}
+
+{{end}}
+</body>
+</html>

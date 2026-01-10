@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>HERALD - {{.ShortFingerprint}}</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<h1>HERALD</h1>
+<p><strong>USER:</strong> {{.ShortFingerprint}}</p>
+<p><strong>STATUS:</strong> ONLINE</p>
+<p><strong>NEXT RUN:</strong> {{.NextRun}}</p>
+<h2>CONFIGS</h2>
+<ul>
+{{range .Configs}}
+    <li><a href="{{.URL}}">{{.Filename}}</a> ({{.FeedCount}} feeds)</li>
+{{else}}
+    <li>No configs uploaded</li>
+{{end}}
+</ul>
+<h2>FEEDS</h2>
+<ul>
+    <li><a href="{{.FeedXMLURL}}">RSS 2.0</a></li>
+    <li><a href="{{.FeedJSONURL}}">JSON Feed</a></li>
+</ul>
+</body>
+</html>

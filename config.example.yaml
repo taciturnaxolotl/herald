@@ -1,0 +1,31 @@
+# Herald Configuration
+
+host: 0.0.0.0
+ssh_port: 2222
+http_port: 8080
+
+# Public URL where Herald is accessible
+origin: http://localhost:8080
+
+# External SSH port (defaults to ssh_port if not set)
+# Use this when SSH is exposed through a different port publicly
+# external_ssh_port: 22
+
+# SSH host keys (generated on first run if missing)
+host_key_path: ./host_key
+
+# Database
+db_path: ./herald.db
+
+# SMTP
+smtp:
+  host: smtp.example.com
+  port: 587
+  user: sender@example.com
+  pass: ${SMTP_PASS}  # Env var substitution
+  from: herald@example.com
+
+# Auth
+allow_all_keys: true
+# allowed_keys:
+#   - "ssh-ed25519 AAAA... user@host"
