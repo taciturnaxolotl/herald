@@ -15,28 +15,28 @@
 - ✅ #26: No Cleanup of Old seen_items (6 month cleanup job)
 - ✅ #23: Missing Graceful Shutdown for Scheduler (panic recovery)
 
-## **P2 - Medium (Code Quality & UX)**
+## **P2 - Medium (Code Quality & UX)** ✅ COMPLETE
 
 ### Group A: Input Validation
 
-- #16: No SMTP Auth Validation
-- #27: No Feed Validation on Upload
-- #37: No Cron Validation at Upload
+- ✅ #16: No SMTP Auth Validation
+- ✅ #27: No Feed Validation on Upload
+- ✅ #37: No Cron Validation at Upload
 - ✅ #36: No Max File Size on SCP Upload
 
 ### Group B: Performance Tuning
 
-- #9: No Prepared Statements
-- #10: Inefficient Sorting in Handlers
-- #11: No HTTP Caching Headers
+- ✅ #9: No Prepared Statements
+- ✅ #10: Inefficient Sorting in Handlers
+- ✅ #11: No HTTP Caching Headers
 
-## **P3 - Low (Nice to Have)**
+## **P3 - Low (Nice to Have)** ✅ COMPLETE
 
 ### Group C: Observability
 
-- #24: No Metrics/Observability
-- #35: HTTP Server Doesn't Log Requests
-- #22: Inconsistent Logging Levels
+- ✅ #24: No Metrics/Observability
+- ✅ #35: HTTP Server Doesn't Log Requests
+- ✅ #22: Inconsistent Logging Levels
 
 ### Group D: Architecture & Scalability
 
@@ -45,16 +45,16 @@
 
 ### Group E: Code Hygiene
 
-- #3: Context Timeout Duplication
-- #19: Magic Numbers
-- #18: Error Wrapping Inconsistency
-- #21: Unused Context Parameter
-- #33-34: Minor Code Cleanup
+- ⚠️ #3: Context Timeout Duplication (not an issue)
+- ✅ #19: Magic Numbers
+- ✅ #18: Error Wrapping Inconsistency (already consistent)
+- ✅ #21: Unused Context Parameter
+- ✅ #33-34: Minor Code Cleanup
 
 ### Group F: Documentation
 
-- #28: Inconsistent Command Help
-- #29: Config Example Doesn't Match Defaults
+- ✅ #28: Inconsistent Command Help
+- ✅ #29: Config Example Doesn't Match Defaults
 
 ### Group G: Testing
 
@@ -128,34 +128,39 @@ While you set a 30s timeout on the context, the HTTP client also has a separate 
 - Updated `scheduler/scheduler.go:collectNewItems()` to use batch GUID checking
 - Updated `web/handlers.go` dashboard handler to batch fetch all feeds
 
-### 9. **No Prepared Statements** 📝
+### 9. **No Prepared Statements** ✅
 
 **Location:** All store methods
 
-Every query uses `QueryContext`/`ExecContext` with raw SQL strings. These are reparsed on every call.
+**Fixed:** Added prepared statements for 7 most frequent queries:
+- `store/db.go:11-73` - Added `preparedStmts` struct and `prepareStatements()` method
+- Prepared statements for: markItemSeen, isItemSeen, getSeenItems, getConfig, updateConfigRun, updateFeedMeta, cleanupSeenItems
+- Updated store methods in `items.go`, `configs.go`, and `feeds.go` to use prepared statements
+- Statements closed on database close for proper cleanup
 
-**Fix:** Use prepared statements for frequently called queries (IsItemSeen, MarkItemSeen, etc.).
-
-### 10. **Inefficient Sorting in Handlers** 🔢
+### 10. **Inefficient Sorting in Handlers** ✅
 
 **Location:** `web/handlers.go:231-235` and `326-330`
 
-You sort items by parsing time strings in a comparison function. This parses the same timestamps multiple times.
+**Fixed:**
+- Added `rssItemWithTime` and `jsonFeedItemWithTime` wrapper structs in `web/handlers.go`
+- Parse timestamps once into `time.Time` field when building items
+- Sort by parsed `time.Time` directly (single comparison)
+- Convert back to original structs for encoding
+- Eliminates repeated `time.Parse()` calls during sorting
 
-**Fix:** Parse once, sort by parsed time, or use database ORDER BY.
-
-### 11. **No HTTP Caching Headers** 🌐
+### 11. **No HTTP Caching Headers** ✅
 
 **Location:** `web/handlers.go` - all feed handlers
 
-RSS/JSON feeds don't set `Cache-Control`, `ETag`, or `Last-Modified` headers. Every request fetches from DB.
-
-**Fix:** Add caching headers:
-
-```go
-w.Header().Set("Cache-Control", "public, max-age=300")
-w.Header().Set("ETag", fmt.Sprintf(`"%s-%d"`, fingerprint, cfg.LastRun.Time.Unix()))
-```
+**Fixed:**
+- Added `Cache-Control: public, max-age=300` (5 minute cache)
+- Added `ETag` header with format "fingerprint-timestamp"
+- Added `Last-Modified` header from cfg.LastRun
+- Added conditional request handling for `If-None-Match` (ETag)
+- Added conditional request handling for `If-Modified-Since`
+- Returns 304 Not Modified when appropriate
+- Applied to both RSS and JSON feed handlers in `web/handlers.go`
 
 ### 12. **Database Migration Runs on Every Connection** 🔄
 
@@ -171,13 +176,17 @@ Migration runs inside `Open()`, which happens once at startup. However, `Migrate
 
 **Already implemented:** Using `net/mail.ParseAddress()` in `config/validate.go:24-26`
 
-### 16. **No SMTP Auth Validation** 🔒
+### 16. **No SMTP Auth Validation** ✅
 
 **Location:** `email/send.go:102-105`
 
-SMTP auth is optional (`if m.cfg.User != "" && m.cfg.Pass != ""`). Many SMTP servers require auth, and this silently continues without it.
-
-**Fix:** Validate SMTP config at startup.
+**Fixed:**
+- Added `ValidateConfig()` method in `email/send.go:33-95`
+- Validates SMTP connectivity and authentication at startup
+- Port 465: Uses implicit TLS connection
+- Port 587: Connects, then calls STARTTLS before authentication
+- Called from `main.go:172-175` after mailer creation
+- Returns error on connection, TLS, or auth failure
 
 ### 17. **SQL Injection Potential in UPSERT** 💉
 
@@ -195,9 +204,9 @@ ON CONFLICT(feed_id, guid) DO UPDATE SET ...
 
 ## **Code Quality Issues**
 
-### 18. **Error Wrapping Inconsistency** 🎁
+### 18. **Error Wrapping Inconsistency** ✅
 
-Some functions use `fmt.Errorf("verb: %w", err)`, others use `fmt.Errorf("verb %w", err)` (no colon). Inconsistent style makes logs harder to parse.
+**Analysis:** All fmt.Errorf calls already follow consistent "verb: %w" pattern with colon. No changes needed.
 
 ### 19. **Magic Numbers** 🎩
 
@@ -216,21 +225,22 @@ Some functions use `fmt.Errorf("verb: %w", err)`, others use `fmt.Errorf("verb %
 
 Zero test coverage. Critical business logic (cron parsing, config parsing, email rendering) is untested.
 
-### 21. **Unused Context Parameter** 🗑️
+### 21. **Unused Context Parameter** ✅
 
-**Location:** `store/db.go:109-111`
+**Fixed:**
+- Removed unused ctx parameter from `store/db.go:Migrate()` method
+- Updated call site in `main.go` to match new signature
 
-```go
-func (db *DB) Migrate(ctx context.Context) error {
-    return db.migrate() // ctx is ignored
-}
-```
+### 22. **Inconsistent Logging Levels** ✅
 
-Either remove the context parameter or pass it to a context-aware migrate function.
-
-### 22. **Inconsistent Logging Levels** 📝
-
-Some errors are `logger.Error`, some are `logger.Warn`. For example, feed fetch errors are `Warn` (line 89 of scheduler.go) but other errors are `Error`. Establish consistent criteria.
+**Fixed:**
+- Established clear criteria: Error for critical failures, Warn for expected/recoverable failures
+- Changed 23 log calls from Error to Warn:
+  - Database read operations in web handlers (14 calls)
+  - Template rendering failures (6 calls)
+  - Response encoding failures (2 calls)
+  - Delete token operation (1 call)
+- All logging now follows consistent severity guidelines
 
 ### 23. **Missing Graceful Shutdown for Scheduler** ✅
 
@@ -245,9 +255,14 @@ Some errors are `logger.Error`, some are `logger.Warn`. For example, feed fetch 
 
 ## **Missing Features**
 
-### 24. **No Metrics/Observability** 📈
+### 24. **No Metrics/Observability** ✅
 
-No Prometheus metrics, no health check endpoint, no structured logging for monitoring. For a long-running service, this is critical.
+**Fixed:**
+- Added `/metrics` endpoint returning JSON with system and application metrics in `web/metrics.go`
+- Metrics include: uptime, goroutines, memory stats, request counts, emails sent, feeds fetched, items seen, active configs, errors, rate limit hits
+- Added `/health` endpoint for health checks
+- Metrics tracked via atomic counters for thread safety
+- Integrated into web server with proper HTTP headers
 
 ### 25. **No Email Validation on Successful Send** ✅
 
@@ -261,25 +276,32 @@ You log `"email sent"` but don't verify SMTP actually accepted it (some SMTP ser
 - Cleanup runs on startup and then daily, removing items older than 6 months
 - Added logging for cleanup operations showing number of items deleted
 
-### 27. **No Feed Validation on Upload** 🔍
+### 27. **No Feed Validation on Upload** ✅
 
-When a user uploads a config with feed URLs, you don't validate the URLs are actually RSS/Atom feeds. First run will fail.
-
-**Fix:** Optionally fetch and validate feeds on upload (with short timeout).
+**Fixed:**
+- Added `ValidateFeedURLs()` function in `config/validate.go:1-48`
+- Fetches and parses each feed URL using gofeed parser
+- Uses 10 second context timeout, 5 second HTTP client timeout
+- Returns error if feed unreachable, returns non-200, or fails to parse
+- Called from `ssh/scp.go:136-147` during config upload
+- Validation happens after basic config validation, before database operations
 
 ---
 
 ## **Documentation Issues**
 
-### 28. **Inconsistent Command Help** 📖
+### 28. **Inconsistent Command Help** ✅
 
-`ssh/server.go:160-165` shows welcome message with command list, but the actual commands are in `ssh/commands.go` (not reviewed in detail). These could drift out of sync.
+**Fixed:**
+- Updated welcome message in `ssh/server.go:168-177` to include all available commands
+- Added missing `activate` and `deactivate` commands to help text
+- Welcome message now matches actual available commands in `ssh/commands.go`
 
-### 29. **Config Example Doesn't Match Defaults** ⚙️
+### 29. **Config Example Doesn't Match Defaults** ✅
 
-`main.go:88` shows `inline: false` as default in comment, but `config/parse.go:27` sets default to `false`, and `README.md:89` says default is `true`.
-
-**Fix:** Align all documentation with actual code defaults.
+**Fixed:**
+- Updated `README.md:89` to show `inline` default as `false` (matching code in `config/parse.go:27`)
+- Documentation now consistent with actual code behavior
 
 ---
 
@@ -305,11 +327,11 @@ Hardcoded limit of 100 items. Users can't access older items.
 
 ## **Minor Issues**
 
-33. **Unused `getCommitHash()` function** - `main.go:127-140` - function defined but only used in one place, could be inlined
-34. **Inconsistent fingerprint shortening** - Sometimes 12 chars, sometimes 7 chars
-35. **HTTP server doesn't log requests** - No request logging middleware
+33. ✅ **Unused `getCommitHash()` function** - Fixed: Inlined into `main.go:179-195`
+34. ✅ **Inconsistent fingerprint shortening** - Fixed: Standardized to 8 chars using `shortFingerprintLen` constant in `web/handlers.go`
+35. ✅ **HTTP server doesn't log requests** - Fixed: Added logging middleware in `web/server.go:90-116`
 36. ✅ **No max file size on SCP upload** - Fixed: 1MB limit in `ssh/scp.go:112-115`
-37. **No validation on cron expressions at upload time** - Invalid cron is only caught on first run
+37. ✅ **No validation on cron expressions at upload time** - Already implemented via `config.Validate()` and `calculateNextRun()` in config validation
 
 ---
 
