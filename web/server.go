@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/log"
 	"github.com/kierank/herald/ratelimit"
@@ -25,6 +26,7 @@ type Server struct {
 	tmpl        *template.Template
 	commitHash  string
 	rateLimiter *ratelimit.Limiter
+	metrics     *Metrics
 }
 
 func NewServer(st *store.DB, addr string, origin string, sshPort int, logger *log.Logger, commitHash string) *Server {
@@ -38,6 +40,7 @@ func NewServer(st *store.DB, addr string, origin string, sshPort int, logger *lo
 		tmpl:        tmpl,
 		commitHash:  commitHash,
 		rateLimiter: ratelimit.New(10, 20), // 10 req/sec, burst of 20
+		metrics:     NewMetrics(),
 	}
 }
 
@@ -46,10 +49,12 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 
 	mux.HandleFunc("/", s.routeHandler)
 	mux.HandleFunc("/style.css", s.handleStyleCSS)
+	mux.HandleFunc("/health", s.handleHealth)
+	mux.HandleFunc("/metrics", s.handleMetrics)
 
 	srv := &http.Server{
 		Addr:    s.addr,
-		Handler: s.rateLimitMiddleware(mux),
+		Handler: s.loggingMiddleware(s.rateLimitMiddleware(mux)),
 	}
 
 	go func() {
@@ -73,6 +78,7 @@ func (s *Server) rateLimitMiddleware(next http.Handler) http.Handler {
 		}
 
 		if !s.rateLimiter.Allow(ip) {
+			s.metrics.RateLimitHits.Add(1)
 			s.logger.Warn("rate limit exceeded", "ip", ip, "path", r.URL.Path)
 			http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
 			return
@@ -80,6 +86,45 @@ func (s *Server) rateLimitMiddleware(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		
+		s.metrics.RequestsTotal.Add(1)
+		s.metrics.RequestsActive.Add(1)
+		defer s.metrics.RequestsActive.Add(-1)
+		
+		// Wrap response writer to capture status code
+		lrw := &loggingResponseWriter{ResponseWriter: w, statusCode: http.StatusOK}
+		
+		next.ServeHTTP(lrw, r)
+		
+		duration := time.Since(start)
+		
+		s.logger.Info("http request",
+			"method", r.Method,
+			"path", r.URL.Path,
+			"status", lrw.statusCode,
+			"duration_ms", duration.Milliseconds(),
+			"remote_addr", r.RemoteAddr,
+		)
+		
+		if lrw.statusCode >= 500 {
+			s.metrics.ErrorsTotal.Add(1)
+		}
+	})
+}
+
+type loggingResponseWriter struct {
+	http.ResponseWriter
+	statusCode int
+}
+
+func (lrw *loggingResponseWriter) WriteHeader(code int) {
+	lrw.statusCode = code
+	lrw.ResponseWriter.WriteHeader(code)
 }
 
 func (s *Server) routeHandler(w http.ResponseWriter, r *http.Request) {

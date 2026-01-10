@@ -12,6 +12,11 @@ import (
 	"time"
 )
 
+const (
+	maxFeedItems          = 100
+	shortFingerprintLen   = 8
+)
+
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	host := parseOriginHost(s.origin)
 	
@@ -37,7 +42,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		ShortCommitHash: shortHash,
 	}
 	if err := s.tmpl.ExecuteTemplate(w, "index.html", data); err != nil {
-		s.logger.Error("render index", "err", err)
+		s.logger.Warn("render index", "err", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 	}
 }
@@ -79,14 +84,14 @@ func (s *Server) handleUser(w http.ResponseWriter, r *http.Request, fingerprint 
 			s.handle404(w, r)
 			return
 		}
-		s.logger.Error("get user", "err", err)
+		s.logger.Warn("get user", "err", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
 
 	configs, err := s.store.ListConfigs(ctx, user.ID)
 	if err != nil {
-		s.logger.Error("list configs", "err", err)
+		s.logger.Warn("list configs", "err", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
@@ -98,7 +103,7 @@ func (s *Server) handleUser(w http.ResponseWriter, r *http.Request, fingerprint 
 	}
 	feedsByConfig, err := s.store.GetFeedsByConfigs(ctx, configIDs)
 	if err != nil {
-		s.logger.Error("get feeds by configs", "err", err)
+		s.logger.Warn("get feeds by configs", "err", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
@@ -144,8 +149,8 @@ func (s *Server) handleUser(w http.ResponseWriter, r *http.Request, fingerprint 
 	}
 
 	shortFP := fingerprint
-	if len(shortFP) > 12 {
-		shortFP = shortFP[:12]
+	if len(shortFP) > shortFingerprintLen {
+		shortFP = shortFP[:shortFingerprintLen]
 	}
 
 	data := userPageData{
@@ -158,7 +163,7 @@ func (s *Server) handleUser(w http.ResponseWriter, r *http.Request, fingerprint 
 	}
 
 	if err := s.tmpl.ExecuteTemplate(w, "user.html", data); err != nil {
-		s.logger.Error("render user", "err", err)
+		s.logger.Warn("render user", "err", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 	}
 }
@@ -197,7 +202,7 @@ func (s *Server) handleFeedXML(w http.ResponseWriter, r *http.Request, fingerpri
 			s.handle404(w, r)
 			return
 		}
-		s.logger.Error("get user", "err", err)
+		s.logger.Warn("get user", "err", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
@@ -208,7 +213,7 @@ func (s *Server) handleFeedXML(w http.ResponseWriter, r *http.Request, fingerpri
 			s.handle404(w, r)
 			return
 		}
-		s.logger.Error("get config", "err", err)
+		s.logger.Warn("get config", "err", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
@@ -216,7 +221,7 @@ func (s *Server) handleFeedXML(w http.ResponseWriter, r *http.Request, fingerpri
 	var items []rssItemWithTime
 	feeds, err := s.store.GetFeedsByConfig(ctx, cfg.ID)
 	if err != nil {
-		s.logger.Error("get feeds", "err", err)
+		s.logger.Warn("get feeds", "err", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
@@ -248,8 +253,8 @@ func (s *Server) handleFeedXML(w http.ResponseWriter, r *http.Request, fingerpri
 		return items[i].parsedTime.After(items[j].parsedTime)
 	})
 
-	if len(items) > 100 {
-		items = items[:100]
+	if len(items) > maxFeedItems {
+		items = items[:maxFeedItems]
 	}
 
 	// Convert to rssItem for XML encoding
@@ -272,7 +277,7 @@ func (s *Server) handleFeedXML(w http.ResponseWriter, r *http.Request, fingerpri
 	w.Header().Set("Content-Type", "application/rss+xml; charset=utf-8")
 	w.Header().Set("Cache-Control", "public, max-age=300")
 	if cfg.LastRun.Valid {
-		etag := fmt.Sprintf(`"%s-%d"`, fingerprint[:8], cfg.LastRun.Time.Unix())
+		etag := fmt.Sprintf(`"%s-%d"`, fingerprint[:shortFingerprintLen], cfg.LastRun.Time.Unix())
 		w.Header().Set("ETag", etag)
 		w.Header().Set("Last-Modified", cfg.LastRun.Time.UTC().Format(http.TimeFormat))
 		
@@ -326,7 +331,7 @@ func (s *Server) handleFeedJSON(w http.ResponseWriter, r *http.Request, fingerpr
 			s.handle404(w, r)
 			return
 		}
-		s.logger.Error("get user", "err", err)
+		s.logger.Warn("get user", "err", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
@@ -337,7 +342,7 @@ func (s *Server) handleFeedJSON(w http.ResponseWriter, r *http.Request, fingerpr
 			s.handle404(w, r)
 			return
 		}
-		s.logger.Error("get config", "err", err)
+		s.logger.Warn("get config", "err", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
@@ -345,7 +350,7 @@ func (s *Server) handleFeedJSON(w http.ResponseWriter, r *http.Request, fingerpr
 	var items []jsonFeedItemWithTime
 	feeds, err := s.store.GetFeedsByConfig(ctx, cfg.ID)
 	if err != nil {
-		s.logger.Error("get feeds", "err", err)
+		s.logger.Warn("get feeds", "err", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
@@ -377,8 +382,8 @@ func (s *Server) handleFeedJSON(w http.ResponseWriter, r *http.Request, fingerpr
 		return items[i].parsedTime.After(items[j].parsedTime)
 	})
 
-	if len(items) > 100 {
-		items = items[:100]
+	if len(items) > maxFeedItems {
+		items = items[:maxFeedItems]
 	}
 
 	// Convert to jsonFeedItem for JSON encoding
@@ -399,7 +404,7 @@ func (s *Server) handleFeedJSON(w http.ResponseWriter, r *http.Request, fingerpr
 	w.Header().Set("Content-Type", "application/feed+json; charset=utf-8")
 	w.Header().Set("Cache-Control", "public, max-age=300")
 	if cfg.LastRun.Valid {
-		etag := fmt.Sprintf(`"%s-%d"`, fingerprint[:8], cfg.LastRun.Time.Unix())
+		etag := fmt.Sprintf(`"%s-%d"`, fingerprint[:shortFingerprintLen], cfg.LastRun.Time.Unix())
 		w.Header().Set("ETag", etag)
 		w.Header().Set("Last-Modified", cfg.LastRun.Time.UTC().Format(http.TimeFormat))
 		
@@ -432,7 +437,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request, fingerprin
 			s.handle404(w, r)
 			return
 		}
-		s.logger.Error("get user", "err", err)
+		s.logger.Warn("get user", "err", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
@@ -443,7 +448,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request, fingerprin
 			s.handle404(w, r)
 			return
 		}
-		s.logger.Error("get config", "err", err)
+		s.logger.Warn("get config", "err", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
@@ -477,14 +482,14 @@ func (s *Server) handleUnsubscribeGET(w http.ResponseWriter, r *http.Request, to
 
 	user, err := s.store.GetUserByID(ctx, cfg.UserID)
 	if err != nil {
-		s.logger.Error("get user", "err", err)
+		s.logger.Warn("get user", "err", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
 
 	shortFP := user.PubkeyFP
-	if len(shortFP) > 12 {
-		shortFP = shortFP[:12]
+	if len(shortFP) > shortFingerprintLen {
+		shortFP = shortFP[:shortFingerprintLen]
 	}
 
 	data := unsubscribePageData{
@@ -494,7 +499,7 @@ func (s *Server) handleUnsubscribeGET(w http.ResponseWriter, r *http.Request, to
 	}
 
 	if err := s.tmpl.ExecuteTemplate(w, "unsubscribe.html", data); err != nil {
-		s.logger.Error("render unsubscribe", "err", err)
+		s.logger.Warn("render unsubscribe", "err", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 	}
 }
@@ -545,7 +550,7 @@ func (s *Server) handleUnsubscribePOST(w http.ResponseWriter, r *http.Request, t
 	}
 
 	if err := s.store.DeleteToken(ctx, token); err != nil {
-		s.logger.Error("delete token", "err", err)
+		s.logger.Warn("delete token", "err", err)
 	}
 
 	data := unsubscribePageData{
@@ -554,7 +559,7 @@ func (s *Server) handleUnsubscribePOST(w http.ResponseWriter, r *http.Request, t
 	}
 
 	if err := s.tmpl.ExecuteTemplate(w, "unsubscribe.html", data); err != nil {
-		s.logger.Error("render unsubscribe", "err", err)
+		s.logger.Warn("render unsubscribe", "err", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 	}
 }
@@ -609,7 +614,7 @@ func (s *Server) handle404(w http.ResponseWriter, r *http.Request) {
 		Message string
 	}{}
 	if err := s.tmpl.ExecuteTemplate(w, "404.html", data); err != nil {
-		s.logger.Error("render 404", "err", err)
+		s.logger.Warn("render 404", "err", err)
 		http.Error(w, "Not Found", http.StatusNotFound)
 	}
 }
@@ -624,7 +629,7 @@ func (s *Server) handle404WithMessage(w http.ResponseWriter, r *http.Request, ti
 		Message: message,
 	}
 	if err := s.tmpl.ExecuteTemplate(w, "404.html", data); err != nil {
-		s.logger.Error("render 404", "err", err)
+		s.logger.Warn("render 404", "err", err)
 		http.Error(w, "Not Found", http.StatusNotFound)
 	}
 }
