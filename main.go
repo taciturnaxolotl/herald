@@ -49,6 +49,8 @@ Upload a feed config via SCP, get email digests on a schedule.`,
 	if err := fang.Execute(
 		context.Background(),
 		rootCmd,
+		fang.WithVersion(version),
+		fang.WithCommit(commitHash),
 		fang.WithNotifySignal(os.Interrupt, os.Kill),
 	); err != nil {
 		os.Exit(1)

@@ -29,10 +29,14 @@
         {
           default = pkgs.buildGoModule {
             pname = "herald";
-            version = "0.1.0";
+            version = "0.1.1";
             subPackages = [ "." ];
             src = self;
             vendorHash = "sha256-IE7JMJ4DehwYxrkh5YCgw7yWdybxtCCxWQO7M/u6bno=";
+            ldflags = [
+              "-X main.commitHash=${self.rev or self.dirtyRev or "dev"}"
+              "-X main.version=0.1.1"
+            ];
           };
         }
       );
