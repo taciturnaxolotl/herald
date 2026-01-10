@@ -10,6 +10,11 @@ import (
 	"github.com/mmcdole/gofeed"
 )
 
+const (
+	feedFetchTimeout  = 30 * time.Second
+	maxConcurrentFetch = 10
+)
+
 type FetchResult struct {
 	FeedID       int64
 	FeedName     string
@@ -38,7 +43,7 @@ func FetchFeed(ctx context.Context, feed *store.Feed) *FetchResult {
 		result.FeedName = feed.Name.String
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, feedFetchTimeout)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, feed.URL, nil)
@@ -123,12 +128,11 @@ func FetchFeeds(ctx context.Context, feeds []*store.Feed) []*FetchResult {
 	results := make([]*FetchResult, len(feeds))
 	var wg sync.WaitGroup
 	
-	// Limit concurrent fetches to 10 to avoid overwhelming the system
-	maxConcurrent := 10
-	if len(feeds) < maxConcurrent {
-		maxConcurrent = len(feeds)
+	concurrent := maxConcurrentFetch
+	if len(feeds) < concurrent {
+		concurrent = len(feeds)
 	}
-	semaphore := make(chan struct{}, maxConcurrent)
+	semaphore := make(chan struct{}, concurrent)
 
 	for i, feed := range feeds {
 		wg.Add(1)

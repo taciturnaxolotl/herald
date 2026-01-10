@@ -187,7 +187,7 @@ func (db *DB) prepareStatements() error {
 	return nil
 }
 
-func (db *DB) Migrate(ctx context.Context) error {
+func (db *DB) Migrate() error {
 	return db.migrate()
 }
 

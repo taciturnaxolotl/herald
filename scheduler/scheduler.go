@@ -12,6 +12,20 @@ import (
 	"github.com/kierank/herald/store"
 )
 
+const (
+	// Email rate limiting
+	emailsPerMinutePerUser = 1
+	emailRateBurst         = 1
+
+	// Cleanup intervals
+	cleanupInterval     = 24 * time.Hour
+	seenItemsRetention  = 6 * 30 * 24 * time.Hour // 6 months
+	itemMaxAge          = 3 * 30 * 24 * time.Hour // 3 months
+
+	// Item limits
+	minItemsForDigest = 5
+)
+
 type Scheduler struct {
 	store       *store.DB
 	mailer      *email.Mailer
@@ -28,7 +42,7 @@ func NewScheduler(st *store.DB, mailer *email.Mailer, logger *log.Logger, interv
 		logger:      logger,
 		interval:    interval,
 		originURL:   originURL,
-		rateLimiter: ratelimit.New(1.0/60.0, 1), // 1 email per minute per user
+		rateLimiter: ratelimit.New(1.0/60.0, emailRateBurst),
 	}
 }
 
@@ -65,8 +79,7 @@ func (s *Scheduler) cleanupOldSeenItems(ctx context.Context) {
 		}
 	}()
 
-	// Delete items older than 6 months
-	deleted, err := s.store.CleanupOldSeenItems(ctx, 6*30*24*time.Hour)
+	deleted, err := s.store.CleanupOldSeenItems(ctx, seenItemsRetention)
 	if err != nil {
 		s.logger.Error("failed to cleanup old seen items", "err", err)
 		return
@@ -154,7 +167,7 @@ func (s *Scheduler) RunNow(ctx context.Context, configID int64) (int, error) {
 func (s *Scheduler) collectNewItems(ctx context.Context, results []*FetchResult) ([]email.FeedGroup, int, error) {
 	var feedGroups []email.FeedGroup
 	totalNew := 0
-	threeMonthsAgo := time.Now().AddDate(0, -3, 0)
+	maxAge := time.Now().Add(-itemMaxAge)
 	feedErrors := 0
 
 	for _, result := range results {
@@ -167,7 +180,7 @@ func (s *Scheduler) collectNewItems(ctx context.Context, results []*FetchResult)
 		// Collect all GUIDs for this feed to batch check
 		var guids []string
 		for _, item := range result.Items {
-			if !item.Published.IsZero() && item.Published.Before(threeMonthsAgo) {
+			if !item.Published.IsZero() && item.Published.Before(maxAge) {
 				continue
 			}
 			guids = append(guids, item.GUID)
@@ -183,7 +196,7 @@ func (s *Scheduler) collectNewItems(ctx context.Context, results []*FetchResult)
 		// Collect new items
 		var newItems []email.FeedItem
 		for _, item := range result.Items {
-			if !item.Published.IsZero() && item.Published.Before(threeMonthsAgo) {
+			if !item.Published.IsZero() && item.Published.Before(maxAge) {
 				continue
 			}
 
@@ -226,7 +239,7 @@ func (s *Scheduler) sendDigestAndMarkSeen(ctx context.Context, cfg *store.Config
 	}
 
 	inline := cfg.InlineContent
-	if totalNew > 5 {
+	if totalNew > minItemsForDigest {
 		inline = false
 	}
 

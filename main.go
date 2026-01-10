@@ -124,21 +124,6 @@ allow_all_keys: true
 	}
 }
 
-func getCommitHash() string {
-	// Prefer build-time embedded hash
-	if commitHash != "" && commitHash != "dev" {
-		return commitHash
-	}
-	
-	// Fallback to runtime git query
-	cmd := exec.Command("git", "log", "-1", "--format=%H")
-	output, err := cmd.Output()
-	if err != nil {
-		return "dev"
-	}
-	return strings.TrimSpace(string(output))
-}
-
 func runServer(ctx context.Context) error {
 	cfg, err := config.LoadAppConfig(cfgFile)
 	if err != nil {
@@ -157,7 +142,7 @@ func runServer(ctx context.Context) error {
 	}
 	defer db.Close()
 
-	if err := db.Migrate(ctx); err != nil {
+	if err := db.Migrate(); err != nil {
 		return fmt.Errorf("failed to migrate database: %w", err)
 	}
 
@@ -184,7 +169,18 @@ func runServer(ctx context.Context) error {
 		AllowedKeys:  cfg.AllowedKeys,
 	}, db, sched, logger)
 
-	webServer := web.NewServer(db, fmt.Sprintf("%s:%d", cfg.Host, cfg.HTTPPort), cfg.Origin, cfg.ExternalSSHPort, logger, getCommitHash())
+	// Get commit hash - prefer build-time embedded hash, fallback to git
+	hash := commitHash
+	if hash == "" || hash == "dev" {
+		cmd := exec.Command("git", "log", "-1", "--format=%H")
+		if output, err := cmd.Output(); err == nil {
+			hash = strings.TrimSpace(string(output))
+		} else {
+			hash = "dev"
+		}
+	}
+
+	webServer := web.NewServer(db, fmt.Sprintf("%s:%d", cfg.Host, cfg.HTTPPort), cfg.Origin, cfg.ExternalSSHPort, logger, hash)
 
 	g, ctx := errgroup.WithContext(ctx)
 
