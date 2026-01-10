@@ -13,21 +13,21 @@ import (
 )
 
 const (
-	maxFeedItems          = 100
-	shortFingerprintLen   = 8
-	recentItemsLimit      = 50
-	feedCacheMaxAge       = 300 // 5 minutes
+	maxFeedItems        = 100
+	shortFingerprintLen = 8
+	recentItemsLimit    = 50
+	feedCacheMaxAge     = 300 // 5 minutes
 )
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	host := parseOriginHost(s.origin)
-	
+
 	// Get short commit hash (first 7 chars)
 	shortHash := s.commitHash
 	if len(shortHash) > 7 {
 		shortHash = shortHash[:7]
 	}
-	
+
 	data := struct {
 		Origin          string
 		OriginHost      string
@@ -227,7 +227,7 @@ func (s *Server) handleFeedXML(w http.ResponseWriter, r *http.Request, fingerpri
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
-	
+
 	for _, feed := range feeds {
 		seenItems, err := s.store.GetSeenItems(ctx, feed.ID, 50)
 		if err != nil {
@@ -282,13 +282,13 @@ func (s *Server) handleFeedXML(w http.ResponseWriter, r *http.Request, fingerpri
 		etag := fmt.Sprintf(`"%s-%d"`, fingerprint[:shortFingerprintLen], cfg.LastRun.Time.Unix())
 		w.Header().Set("ETag", etag)
 		w.Header().Set("Last-Modified", cfg.LastRun.Time.UTC().Format(http.TimeFormat))
-		
+
 		// Check If-None-Match
 		if match := r.Header.Get("If-None-Match"); match == etag {
 			w.WriteHeader(http.StatusNotModified)
 			return
 		}
-		
+
 		// Check If-Modified-Since
 		if modSince := r.Header.Get("If-Modified-Since"); modSince != "" {
 			if t, err := http.ParseTime(modSince); err == nil && !cfg.LastRun.Time.After(t) {
@@ -297,7 +297,7 @@ func (s *Server) handleFeedXML(w http.ResponseWriter, r *http.Request, fingerpri
 			}
 		}
 	}
-	
+
 	w.Write([]byte(xml.Header))
 	enc := xml.NewEncoder(w)
 	enc.Indent("", "  ")
@@ -356,7 +356,7 @@ func (s *Server) handleFeedJSON(w http.ResponseWriter, r *http.Request, fingerpr
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
-	
+
 	for _, feed := range feeds {
 		seenItems, err := s.store.GetSeenItems(ctx, feed.ID, recentItemsLimit)
 		if err != nil {
@@ -409,13 +409,13 @@ func (s *Server) handleFeedJSON(w http.ResponseWriter, r *http.Request, fingerpr
 		etag := fmt.Sprintf(`"%s-%d"`, fingerprint[:shortFingerprintLen], cfg.LastRun.Time.Unix())
 		w.Header().Set("ETag", etag)
 		w.Header().Set("Last-Modified", cfg.LastRun.Time.UTC().Format(http.TimeFormat))
-		
+
 		// Check If-None-Match
 		if match := r.Header.Get("If-None-Match"); match == etag {
 			w.WriteHeader(http.StatusNotModified)
 			return
 		}
-		
+
 		// Check If-Modified-Since
 		if modSince := r.Header.Get("If-Modified-Since"); modSince != "" {
 			if t, err := http.ParseTime(modSince); err == nil && !cfg.LastRun.Time.After(t) {
@@ -424,7 +424,7 @@ func (s *Server) handleFeedJSON(w http.ResponseWriter, r *http.Request, fingerpr
 			}
 		}
 	}
-	
+
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	enc.Encode(feed)
@@ -567,11 +567,12 @@ func (s *Server) handleUnsubscribePOST(w http.ResponseWriter, r *http.Request, t
 }
 
 func (s *Server) handleUnsubscribe(w http.ResponseWriter, r *http.Request, token string) {
-	if r.Method == http.MethodGet {
+	switch r.Method {
+	case http.MethodGet:
 		s.handleUnsubscribeGET(w, r, token)
-	} else if r.Method == http.MethodPost {
+	case http.MethodPost:
 		s.handleUnsubscribePOST(w, r, token)
-	} else {
+	default:
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 	}
 }
@@ -580,7 +581,7 @@ func stripProtocol(origin string) string {
 	if len(origin) == 0 {
 		return origin
 	}
-	
+
 	// Remove http:// or https://
 	if len(origin) > 7 && origin[:7] == "http://" {
 		return origin[7:]
@@ -588,7 +589,7 @@ func stripProtocol(origin string) string {
 	if len(origin) > 8 && origin[:8] == "https://" {
 		return origin[8:]
 	}
-	
+
 	return origin
 }
 
@@ -598,14 +599,14 @@ func parseOriginHost(origin string) string {
 	if hostPort == "" {
 		return "localhost"
 	}
-	
+
 	// Strip port if present
 	for i := len(hostPort) - 1; i >= 0; i-- {
 		if hostPort[i] == ':' {
 			return hostPort[:i]
 		}
 	}
-	
+
 	return hostPort
 }
 

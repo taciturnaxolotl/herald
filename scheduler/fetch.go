@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	feedFetchTimeout  = 30 * time.Second
+	feedFetchTimeout   = 30 * time.Second
 	maxConcurrentFetch = 10
 )
 
@@ -127,7 +127,7 @@ func FetchFeed(ctx context.Context, feed *store.Feed) *FetchResult {
 func FetchFeeds(ctx context.Context, feeds []*store.Feed) []*FetchResult {
 	results := make([]*FetchResult, len(feeds))
 	var wg sync.WaitGroup
-	
+
 	concurrent := maxConcurrentFetch
 	if len(feeds) < concurrent {
 		concurrent = len(feeds)

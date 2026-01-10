@@ -14,14 +14,14 @@ import (
 
 const (
 	// Email rate limiting
-	emailsPerMinutePerUser   = 1
-	emailRateBurst           = 1
-	emailsPerSecondPerUser   = emailsPerMinutePerUser / 60.0
+	emailsPerMinutePerUser = 1
+	emailRateBurst         = 1
+	emailsPerSecondPerUser = emailsPerMinutePerUser / 60.0
 
 	// Cleanup intervals
-	cleanupInterval     = 24 * time.Hour
-	seenItemsRetention  = 6 * 30 * 24 * time.Hour // 6 months
-	itemMaxAge          = 3 * 30 * 24 * time.Hour // 3 months
+	cleanupInterval    = 24 * time.Hour
+	seenItemsRetention = 6 * 30 * 24 * time.Hour // 6 months
+	itemMaxAge         = 3 * 30 * 24 * time.Hour // 3 months
 
 	// Item limits
 	minItemsForDigest = 5

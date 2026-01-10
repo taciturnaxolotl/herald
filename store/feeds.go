@@ -129,7 +129,7 @@ func (db *DB) GetFeedsByConfigs(ctx context.Context, configIDs []int64) (map[int
 		}
 		feedMap[f.ConfigID] = append(feedMap[f.ConfigID], &f)
 	}
-	
+
 	return feedMap, rows.Err()
 }
 

@@ -102,7 +102,7 @@ func (h *scpHandler) Mkdir(s ssh.Session, entry *scp.DirEntry) error {
 
 func (h *scpHandler) Write(s ssh.Session, entry *scp.FileEntry) (int64, error) {
 	h.logger.Debug("SCP Write called", "name", entry.Name, "size", entry.Size)
-	
+
 	user, ok := s.Context().Value("user").(*store.User)
 	if !ok {
 		return 0, fmt.Errorf("no user in context")
@@ -148,7 +148,7 @@ func (h *scpHandler) Write(s ssh.Session, entry *scp.FileEntry) (int64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("failed to calculate next run: %w", err)
 	}
-	
+
 	// Use transaction for config update
 	tx, err := h.store.BeginTx(ctx)
 	if err != nil {

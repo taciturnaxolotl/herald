@@ -43,6 +43,7 @@ func (m *Mailer) ValidateConfig() error {
 	if m.cfg.Port == 465 {
 		tlsConfig := &tls.Config{
 			ServerName: m.cfg.Host,
+			MinVersion: tls.VersionTLS12,
 		}
 
 		conn, err := tls.Dial("tcp", addr, tlsConfig)
@@ -82,6 +83,7 @@ func (m *Mailer) ValidateConfig() error {
 	// Start TLS before auth
 	tlsConfig := &tls.Config{
 		ServerName: m.cfg.Host,
+		MinVersion: tls.VersionTLS12,
 	}
 	if err = client.StartTLS(tlsConfig); err != nil {
 		return fmt.Errorf("STARTTLS: %w", err)
@@ -188,6 +190,7 @@ func encodeQuotedPrintable(s string) string {
 func (m *Mailer) sendWithTLS(addr string, auth smtp.Auth, to, msg string) error {
 	tlsConfig := &tls.Config{
 		ServerName: m.cfg.Host,
+		MinVersion: tls.VersionTLS12,
 	}
 
 	conn, err := tls.Dial("tcp", addr, tlsConfig)

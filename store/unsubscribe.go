@@ -55,11 +55,11 @@ func (db *DB) GetOrCreateUnsubscribeToken(ctx context.Context, configID int64) (
 		`SELECT token FROM unsubscribe_tokens WHERE config_id = ? LIMIT 1`,
 		configID,
 	).Scan(&token)
-	
+
 	if err == nil {
 		return token, nil
 	}
-	
+
 	if err != sql.ErrNoRows {
 		return "", err
 	}

@@ -92,7 +92,7 @@ func (db *DB) GetSeenGUIDs(ctx context.Context, feedID int64, guids []string) (m
 	// Build the query with the appropriate number of placeholders
 	args := make([]interface{}, 0, len(guids)+1)
 	args = append(args, feedID)
-	
+
 	placeholders := "?"
 	for i := 0; i < len(guids)-1; i++ {
 		placeholders += ",?"
@@ -120,7 +120,7 @@ func (db *DB) GetSeenGUIDs(ctx context.Context, feedID int64, guids []string) (m
 		}
 		seenSet[guid] = true
 	}
-	
+
 	return seenSet, rows.Err()
 }
 
@@ -131,11 +131,11 @@ func (db *DB) CleanupOldSeenItems(ctx context.Context, olderThan time.Duration) 
 	if err != nil {
 		return 0, fmt.Errorf("cleanup old seen items: %w", err)
 	}
-	
+
 	deleted, err := result.RowsAffected()
 	if err != nil {
 		return 0, fmt.Errorf("get rows affected: %w", err)
 	}
-	
+
 	return deleted, nil
 }

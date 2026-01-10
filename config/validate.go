@@ -76,12 +76,12 @@ func ValidateFeedURLs(ctx context.Context, cfg *ParsedConfig) error {
 		}
 
 		if resp.StatusCode != http.StatusOK {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			return fmt.Errorf("feed %s returned status %d", feed.URL, resp.StatusCode)
 		}
 
 		_, err = parser.Parse(resp.Body)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if err != nil {
 			return fmt.Errorf("failed to parse feed %s: %w", feed.URL, err)
 		}

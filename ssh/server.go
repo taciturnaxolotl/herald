@@ -21,9 +21,9 @@ import (
 )
 
 type Config struct {
-	Host        string
-	Port        int
-	HostKeyPath string
+	Host         string
+	Port         int
+	HostKeyPath  string
 	AllowAllKeys bool
 	AllowedKeys  []string
 }
@@ -136,7 +136,7 @@ func (s *Server) commandMiddleware(next ssh.Handler) ssh.Handler {
 	return func(sess ssh.Session) {
 		cmd := sess.Command()
 		s.logger.Debug("commandMiddleware", "cmd", cmd, "len", len(cmd))
-		
+
 		user, ok := sess.Context().Value("user").(*store.User)
 		if !ok {
 			fmt.Fprintln(sess, "Authentication error")
@@ -148,7 +148,7 @@ func (s *Server) commandMiddleware(next ssh.Handler) ssh.Handler {
 			s.handleWelcome(sess, user)
 			return
 		}
-		
+
 		// Check if it's an SCP command - let SCP middleware handle it
 		if len(cmd) > 0 && cmd[0] == "scp" {
 			s.logger.Debug("passing to SCP middleware")

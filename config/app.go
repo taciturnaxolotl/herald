@@ -12,16 +12,16 @@ import (
 )
 
 type AppConfig struct {
-	Host           string     `yaml:"host"`
-	SSHPort        int        `yaml:"ssh_port"`
-	ExternalSSHPort int       `yaml:"external_ssh_port"`
-	HTTPPort       int        `yaml:"http_port"`
-	HostKeyPath    string     `yaml:"host_key_path"`
-	DBPath         string     `yaml:"db_path"`
-	Origin         string     `yaml:"origin"`
-	SMTP           SMTPConfig `yaml:"smtp"`
-	AllowAllKeys   bool       `yaml:"allow_all_keys"`
-	AllowedKeys    []string   `yaml:"allowed_keys"`
+	Host            string     `yaml:"host"`
+	SSHPort         int        `yaml:"ssh_port"`
+	ExternalSSHPort int        `yaml:"external_ssh_port"`
+	HTTPPort        int        `yaml:"http_port"`
+	HostKeyPath     string     `yaml:"host_key_path"`
+	DBPath          string     `yaml:"db_path"`
+	Origin          string     `yaml:"origin"`
+	SMTP            SMTPConfig `yaml:"smtp"`
+	AllowAllKeys    bool       `yaml:"allow_all_keys"`
+	AllowedKeys     []string   `yaml:"allowed_keys"`
 }
 
 type SMTPConfig struct {
@@ -73,7 +73,7 @@ func LoadAppConfig(path string) (*AppConfig, error) {
 	}
 
 	applyEnvOverrides(cfg)
-	
+
 	// Default external_ssh_port to ssh_port if not set
 	if cfg.ExternalSSHPort == 0 {
 		cfg.ExternalSSHPort = cfg.SSHPort
@@ -92,12 +92,12 @@ func findEnvFile(configPath string) string {
 			return envPath
 		}
 	}
-	
+
 	// Otherwise check current directory
 	if _, err := os.Stat(".env"); err == nil {
 		return ".env"
 	}
-	
+
 	return ""
 }
 

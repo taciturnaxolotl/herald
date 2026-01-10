@@ -154,21 +154,21 @@ func TestParse_MultipleFeeds(t *testing.T) {
 	if len(cfg.Feeds) != 3 {
 		t.Fatalf("expected 3 feeds, got %d", len(cfg.Feeds))
 	}
-	
+
 	if cfg.Feeds[0].URL != "https://feed1.com/rss" {
 		t.Errorf("feed[0] URL wrong: %s", cfg.Feeds[0].URL)
 	}
 	if cfg.Feeds[0].Name != "" {
 		t.Errorf("feed[0] should have empty name, got %s", cfg.Feeds[0].Name)
 	}
-	
+
 	if cfg.Feeds[1].URL != "https://feed2.com/atom" {
 		t.Errorf("feed[1] URL wrong: %s", cfg.Feeds[1].URL)
 	}
 	if cfg.Feeds[1].Name != "Feed Two" {
 		t.Errorf("feed[1] name wrong: %s", cfg.Feeds[1].Name)
 	}
-	
+
 	if cfg.Feeds[2].Name != "Feed Three" {
 		t.Errorf("feed[2] name wrong: %s", cfg.Feeds[2].Name)
 	}
@@ -189,7 +189,7 @@ func TestParse_CompleteConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Parse failed: %v", err)
 	}
-	
+
 	if cfg.Email != "user@example.com" {
 		t.Errorf("email wrong: %s", cfg.Email)
 	}
@@ -242,9 +242,9 @@ func TestParseBool(t *testing.T) {
 		{"false", true, false},
 		{"1", false, true},
 		{"0", true, false},
-		{"yes", false, false}, // invalid, returns default
-		{"no", true, true},    // invalid, returns default
-		{"", false, false},    // invalid, returns default
+		{"yes", false, false},   // invalid, returns default
+		{"no", true, true},      // invalid, returns default
+		{"", false, false},      // invalid, returns default
 		{"invalid", true, true}, // invalid, returns default
 	}
 

@@ -114,7 +114,7 @@ allow_all_keys: true
 #   - "ssh-ed25519 AAAA... user@host"
 `
 
-			if err := os.WriteFile(path, []byte(sampleConfig), 0644); err != nil {
+			if err := os.WriteFile(path, []byte(sampleConfig), 0600); err != nil {
 				return fmt.Errorf("failed to write config file: %w", err)
 			}
 

@@ -352,7 +352,7 @@ func TestCleanupOldSeenItems(t *testing.T) {
 
 	// Wait to ensure timestamp is old enough
 	time.Sleep(50 * time.Millisecond)
-	
+
 	// Clean up items older than 10ms
 	deleted, err := db.CleanupOldSeenItems(ctx, 10*time.Millisecond)
 	if err != nil {

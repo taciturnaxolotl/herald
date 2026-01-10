@@ -46,7 +46,7 @@ func TestAllow_SingleKey(t *testing.T) {
 
 func TestAllow_MultipleKeys(t *testing.T) {
 	limiter := New(10, 1)
-	
+
 	key1 := "key1"
 	key2 := "key2"
 

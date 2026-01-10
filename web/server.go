@@ -97,18 +97,18 @@ func (s *Server) rateLimitMiddleware(next http.Handler) http.Handler {
 func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		
+
 		s.metrics.RequestsTotal.Add(1)
 		s.metrics.RequestsActive.Add(1)
 		defer s.metrics.RequestsActive.Add(-1)
-		
+
 		// Wrap response writer to capture status code
 		lrw := &loggingResponseWriter{ResponseWriter: w, statusCode: http.StatusOK}
-		
+
 		next.ServeHTTP(lrw, r)
-		
+
 		duration := time.Since(start)
-		
+
 		s.logger.Info("http request",
 			"method", r.Method,
 			"path", r.URL.Path,
@@ -116,7 +116,7 @@ func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
 			"duration_ms", duration.Milliseconds(),
 			"remote_addr", r.RemoteAddr,
 		)
-		
+
 		if lrw.statusCode >= 500 {
 			s.metrics.ErrorsTotal.Add(1)
 		}
