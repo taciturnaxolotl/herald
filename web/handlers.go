@@ -684,6 +684,10 @@ func parseOriginHost(origin string) string {
 	return hostPort
 }
 
+type keepAlivePageData struct {
+	ExpiresAt string
+}
+
 func (s *Server) handleKeepAlive(w http.ResponseWriter, r *http.Request, token string) {
 	// Only allow GET requests
 	if r.Method != http.MethodGet {
@@ -701,27 +705,13 @@ func (s *Server) handleKeepAlive(w http.ResponseWriter, r *http.Request, token s
 	// Calculate new expiry date (90 days from now)
 	expiresAt := time.Now().AddDate(0, 0, 90).Format("January 2, 2006")
 
-	// Return success message
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	if _, err := fmt.Fprintf(w, `<!DOCTYPE html>
-<html>
-<head>
-	<meta charset="utf-8">
-	<meta name="viewport" content="width=device-width, initial-scale=1">
-	<title>Digest Active</title>
-	<style>
-		body { font-family: system-ui, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; text-align: center; }
-		.success { color: #059669; font-size: 24px; margin-bottom: 20px; }
-		.details { color: #6b7280; font-size: 16px; }
-	</style>
-</head>
-<body>
-	<div class="success">✓ Success!</div>
-	<div class="details">Your digest will stay active until <strong>%s</strong>.</div>
-</body>
-</html>`, expiresAt); err != nil {
-		s.logger.Error("failed to write response", "error", err)
+	data := keepAlivePageData{
+		ExpiresAt: expiresAt,
+	}
+
+	if err := s.tmpl.ExecuteTemplate(w, "keepalive.html", data); err != nil {
+		s.logger.Warn("render keepalive", "err", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 	}
 }
 

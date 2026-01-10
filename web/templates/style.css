@@ -3,64 +3,162 @@
     padding: 0;
     box-sizing: border-box;
 }
+
 html, body {
     font-family: monospace;
-    background: #0a0a0a;
-    color: #e0e0e0;
 }
+
+/* Dark theme (default) */
+@media (prefers-color-scheme: dark) {
+    html, body {
+        background: #0a0a0a;
+        color: #e0e0e0;
+    }
+    
+    a {
+        color: #8ab4f8;
+        text-decoration: underline;
+    }
+    
+    a:hover {
+        color: #fff;
+    }
+    
+    h1 {
+        border-bottom: 2px solid #333;
+    }
+    
+    footer {
+        border-top: 1px solid #333;
+    }
+}
+
+/* Light theme */
+@media (prefers-color-scheme: light) {
+    html, body {
+        background: #fafafa;
+        color: #1a1a1a;
+    }
+    
+    a {
+        color: #1a73e8;
+        text-decoration: underline;
+    }
+    
+    a:hover {
+        color: #000;
+    }
+    
+    h1 {
+        border-bottom: 2px solid #ddd;
+    }
+    
+    footer {
+        border-top: 1px solid #ddd;
+    }
+    
+    .inactive {
+        opacity: 0.5;
+    }
+}
+
 body {
     max-width: 80ch;
     margin: 2rem auto;
     padding: 1rem;
     line-height: 1.5;
 }
+
 a {
-    color: #8ab4f8;
     text-decoration: underline;
 }
-a:hover {
-    color: #fff;
-}
+
 pre {
     white-space: pre-wrap;
     margin: 1rem 0;
 }
+
 h1 {
     font-weight: bold;
     font-size: 1rem;
-    border-bottom: 2px solid #333;
     padding-bottom: 0.5rem;
     margin-bottom: 1rem;
 }
+
 h2 {
     font-weight: bold;
     font-size: 1rem;
     margin-top: 1.5rem;
     margin-bottom: 0.5rem;
 }
+
 p {
     margin: 0.5rem 0;
 }
+
 ul {
     list-style: none;
     margin: 0.5rem 0 1rem 2rem;
 }
+
 li {
     margin: 0.25rem 0;
 }
+
 strong {
     font-weight: bold;
 }
+
 .inactive {
     text-decoration: line-through;
     opacity: 0.6;
 }
+
 footer {
     display: flex;
     justify-content: space-between;
     margin-top: 2rem;
     padding-top: 1rem;
-    border-top: 1px solid #333;
     font-size: 0.9rem;
     opacity: 0.8;
+}
+
+/* Mobile responsiveness */
+@media (max-width: 768px) {
+    body {
+        margin: 1rem auto;
+        padding: 0.75rem;
+        font-size: 0.95rem;
+    }
+    
+    h1 {
+        font-size: 0.95rem;
+    }
+    
+    h2 {
+        font-size: 0.95rem;
+        margin-top: 1rem;
+    }
+    
+    footer {
+        flex-direction: column;
+        gap: 0.5rem;
+        font-size: 0.85rem;
+    }
+    
+    ul {
+        margin-left: 1rem;
+    }
+}
+
+@media (max-width: 480px) {
+    body {
+        margin: 0.5rem auto;
+        padding: 0.5rem;
+        font-size: 0.9rem;
+    }
+    
+    pre {
+        font-size: 0.85rem;
+    }
 }
