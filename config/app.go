@@ -19,6 +19,7 @@ type AppConfig struct {
 	HostKeyPath     string     `yaml:"host_key_path"`
 	DBPath          string     `yaml:"db_path"`
 	Origin          string     `yaml:"origin"`
+	LogLevel        string     `yaml:"log_level"`
 	SMTP            SMTPConfig `yaml:"smtp"`
 	AllowAllKeys    bool       `yaml:"allow_all_keys"`
 	AllowedKeys     []string   `yaml:"allowed_keys"`
@@ -44,6 +45,7 @@ func DefaultAppConfig() *AppConfig {
 		HostKeyPath: "./host_key",
 		DBPath:      "./herald.db",
 		Origin:      "http://localhost:8080",
+		LogLevel:    "info",
 		SMTP: SMTPConfig{
 			Host: "localhost",
 			Port: 587,
@@ -164,5 +166,8 @@ func applyEnvOverrides(cfg *AppConfig) {
 	}
 	if v := os.Getenv("HERALD_ORIGIN"); v != "" {
 		cfg.Origin = v
+	}
+	if v := os.Getenv("HERALD_LOG_LEVEL"); v != "" {
+		cfg.LogLevel = v
 	}
 }

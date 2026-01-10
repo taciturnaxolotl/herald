@@ -5,6 +5,7 @@ import (
 	"context"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/kierank/herald/store"
@@ -12,8 +13,8 @@ import (
 )
 
 const (
-	feedFetchTimeout   = 30 * time.Second
-	maxConcurrentFetch = 10
+	feedFetchTimeout   = 15 * time.Second
+	maxConcurrentFetch = 30
 )
 
 type FetchResult struct {
@@ -63,7 +64,7 @@ func FetchFeed(ctx context.Context, feed *store.Feed) *FetchResult {
 	}
 
 	client := &http.Client{
-		Timeout: 30 * time.Second,
+		Timeout: 15 * time.Second,
 	}
 
 	resp, err := client.Do(req)
@@ -125,7 +126,7 @@ func FetchFeed(ctx context.Context, feed *store.Feed) *FetchResult {
 	return result
 }
 
-func FetchFeeds(ctx context.Context, feeds []*store.Feed) []*FetchResult {
+func FetchFeeds(ctx context.Context, feeds []*store.Feed, progress *atomic.Int32) []*FetchResult {
 	results := make([]*FetchResult, len(feeds))
 	var wg sync.WaitGroup
 
@@ -138,7 +139,12 @@ func FetchFeeds(ctx context.Context, feeds []*store.Feed) []*FetchResult {
 	for i, feed := range feeds {
 		wg.Add(1)
 		go func(idx int, f *store.Feed) {
-			defer wg.Done()
+			defer func() {
+				if progress != nil {
+					progress.Add(1)
+				}
+				wg.Done()
+			}()
 			semaphore <- struct{}{}        // Acquire
 			defer func() { <-semaphore }() // Release
 			results[idx] = FetchFeed(ctx, f)

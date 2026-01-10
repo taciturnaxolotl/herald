@@ -257,7 +257,7 @@ func (m *Mailer) Send(to, subject, htmlBody, textBody, unsubToken, dashboardURL,
 		return m.sendWithTLS(addr, auth, to, messageBytes)
 	}
 
-	return smtp.SendMail(addr, auth, m.cfg.From, []string{to}, messageBytes)
+	return m.sendWithSTARTTLS(addr, auth, to, messageBytes)
 }
 
 func encodeQuotedPrintable(s string) string {
@@ -274,9 +274,14 @@ func (m *Mailer) sendWithTLS(addr string, auth smtp.Auth, to string, msg []byte)
 		MinVersion: tls.VersionTLS12,
 	}
 
-	conn, err := tls.Dial("tcp", addr, tlsConfig)
+	dialer := &net.Dialer{Timeout: 30 * time.Second}
+	conn, err := tls.DialWithDialer(dialer, "tcp", addr, tlsConfig)
 	if err != nil {
 		return fmt.Errorf("TLS dial: %w", err)
+	}
+	if err := conn.SetDeadline(time.Now().Add(30 * time.Second)); err != nil {
+		_ = conn.Close()
+		return fmt.Errorf("set deadline: %w", err)
 	}
 	defer func() { _ = conn.Close() }()
 
@@ -285,6 +290,61 @@ func (m *Mailer) sendWithTLS(addr string, auth smtp.Auth, to string, msg []byte)
 		return fmt.Errorf("SMTP client: %w", err)
 	}
 	defer func() { _ = client.Close() }()
+
+	if auth != nil {
+		if err = client.Auth(auth); err != nil {
+			return fmt.Errorf("auth: %w", err)
+		}
+	}
+
+	if err = client.Mail(m.cfg.From); err != nil {
+		return fmt.Errorf("mail from: %w", err)
+	}
+
+	if err = client.Rcpt(to); err != nil {
+		return fmt.Errorf("rcpt to: %w", err)
+	}
+
+	w, err := client.Data()
+	if err != nil {
+		return fmt.Errorf("data: %w", err)
+	}
+
+	if _, err = w.Write(msg); err != nil {
+		return fmt.Errorf("write: %w", err)
+	}
+
+	if err = w.Close(); err != nil {
+		return fmt.Errorf("close data: %w", err)
+	}
+
+	return client.Quit()
+}
+
+func (m *Mailer) sendWithSTARTTLS(addr string, auth smtp.Auth, to string, msg []byte) error {
+	dialer := &net.Dialer{Timeout: 30 * time.Second}
+	conn, err := dialer.Dial("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("dial: %w", err)
+	}
+	if err := conn.SetDeadline(time.Now().Add(30 * time.Second)); err != nil {
+		_ = conn.Close()
+		return fmt.Errorf("set deadline: %w", err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	client, err := smtp.NewClient(conn, m.cfg.Host)
+	if err != nil {
+		return fmt.Errorf("SMTP client: %w", err)
+	}
+	defer func() { _ = client.Close() }()
+
+	if err = client.StartTLS(&tls.Config{
+		ServerName: m.cfg.Host,
+		MinVersion: tls.VersionTLS12,
+	}); err != nil {
+		return fmt.Errorf("STARTTLS: %w", err)
+	}
 
 	if auth != nil {
 		if err = client.Auth(auth); err != nil {

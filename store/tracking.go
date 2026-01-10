@@ -42,6 +42,17 @@ func (db *DB) RecordEmailSend(configID int64, recipient, subject string, include
 	return trackingToken, nil
 }
 
+// RecordEmailSendTx records an email send within an existing transaction
+func (db *DB) RecordEmailSendTx(tx *sql.Tx, configID int64, recipient, subject, trackingToken string) error {
+	query := `INSERT INTO email_sends (config_id, recipient, subject, tracking_token)
+	          VALUES (?, ?, ?, ?)`
+	_, err := tx.Exec(query, configID, recipient, subject, sql.NullString{String: trackingToken, Valid: trackingToken != ""})
+	if err != nil {
+		return fmt.Errorf("insert email send: %w", err)
+	}
+	return nil
+}
+
 // MarkEmailBounced marks an email as bounced
 func (db *DB) MarkEmailBounced(configID int64, recipient, reason string) error {
 	query := `UPDATE email_sends
@@ -168,6 +179,15 @@ func (db *DB) CleanupOldSends(daysToKeep int) (int64, error) {
 		return 0, fmt.Errorf("cleanup old sends: %w", err)
 	}
 	return result.RowsAffected()
+}
+
+// GenerateTrackingToken generates a secure random tracking token
+func (db *DB) GenerateTrackingToken() (string, error) {
+	b := make([]byte, 24)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return base64.URLEncoding.EncodeToString(b), nil
 }
 
 func generateTrackingToken() (string, error) {

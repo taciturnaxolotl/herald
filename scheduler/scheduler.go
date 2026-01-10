@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/adhocore/gronx"
@@ -31,6 +32,15 @@ const (
 	inactivityThreshold = 90  // days without opens
 	minSendsBeforeDeactivate = 3  // minimum sends before considering deactivation
 )
+
+// RunStats contains detailed statistics from a feed fetch run
+type RunStats struct {
+	TotalFeeds   int
+	FetchedFeeds int
+	FailedFeeds  int
+	NewItems     int
+	EmailSent    bool
+}
 
 type Scheduler struct {
 	store       *store.DB
@@ -184,36 +194,59 @@ func (s *Scheduler) tick(ctx context.Context) {
 	}
 }
 
-func (s *Scheduler) RunNow(ctx context.Context, configID int64) (int, error) {
+func (s *Scheduler) RunNow(ctx context.Context, configID int64, progress *atomic.Int32) (*RunStats, error) {
 	cfg, err := s.store.GetConfigByID(ctx, configID)
 	if err != nil {
-		return 0, fmt.Errorf("get config: %w", err)
+		return nil, fmt.Errorf("get config: %w", err)
 	}
 
 	feeds, err := s.store.GetFeedsByConfig(ctx, cfg.ID)
 	if err != nil {
-		return 0, fmt.Errorf("get feeds: %w", err)
+		return nil, fmt.Errorf("get feeds: %w", err)
 	}
 
 	if len(feeds) == 0 {
-		return 0, fmt.Errorf("no feeds configured")
+		return nil, fmt.Errorf("no feeds configured")
 	}
 
-	results := FetchFeeds(ctx, feeds)
+	stats := &RunStats{
+		TotalFeeds: len(feeds),
+	}
+
+	results := FetchFeeds(ctx, feeds, progress)
+	s.logger.Debug("RunNow: fetching complete", "total", len(feeds))
+
+	// Count successful and failed fetches
+	for _, result := range results {
+		if result.Error != nil {
+			stats.FailedFeeds++
+		} else {
+			stats.FetchedFeeds++
+		}
+	}
+	s.logger.Debug("RunNow: counting complete", "fetched", stats.FetchedFeeds, "failed", stats.FailedFeeds)
 
 	feedGroups, totalNew, err := s.collectNewItems(ctx, results)
+	s.logger.Debug("RunNow: collectNewItems complete", "totalNew", totalNew, "err", err)
 	if err != nil {
-		return 0, err
+		return stats, err
 	}
+
+	stats.NewItems = totalNew
 
 	if totalNew > 0 {
+		s.logger.Debug("RunNow: starting email send")
 		if err := s.sendDigestAndMarkSeen(ctx, cfg, feedGroups, totalNew, results); err != nil {
-			return 0, err
+			s.logger.Error("RunNow: sendDigestAndMarkSeen failed", "err", err)
+			return stats, err
 		}
+		stats.EmailSent = true
 		s.logger.Info("email sent", "to", cfg.Email, "items", totalNew)
 	}
+	s.logger.Debug("RunNow: email phase complete")
 
 	// Update feed metadata
+	s.logger.Debug("RunNow: updating feed metadata", "count", len(results))
 	for _, result := range results {
 		if result.ETag != "" || result.LastModified != "" {
 			if err := s.store.UpdateFeedFetched(ctx, result.FeedID, result.ETag, result.LastModified); err != nil {
@@ -221,20 +254,24 @@ func (s *Scheduler) RunNow(ctx context.Context, configID int64) (int, error) {
 			}
 		}
 	}
+	s.logger.Debug("RunNow: feed metadata updated")
 
+	s.logger.Debug("RunNow: calculating next run")
 	now := time.Now()
 	nextRun, err := gronx.NextTick(cfg.CronExpr, false)
 	if err != nil {
-		return totalNew, fmt.Errorf("calculate next run: %w", err)
+		return stats, fmt.Errorf("calculate next run: %w", err)
 	}
+	s.logger.Debug("RunNow: updating last run", "nextRun", nextRun)
 
 	if err := s.store.UpdateLastRun(ctx, cfg.ID, now, nextRun); err != nil {
-		return totalNew, fmt.Errorf("update last run: %w", err)
+		return stats, fmt.Errorf("update last run: %w", err)
 	}
 
 	_ = s.store.AddLog(ctx, cfg.ID, "info", fmt.Sprintf("Processed: %d new items, next run: %s", totalNew, nextRun.Format(time.RFC3339)))
 
-	return totalNew, nil
+	s.logger.Debug("RunNow: complete")
+	return stats, nil
 }
 
 func (s *Scheduler) collectNewItems(ctx context.Context, results []*FetchResult) ([]email.FeedGroup, int, error) {
@@ -305,6 +342,7 @@ func (s *Scheduler) collectNewItems(ctx context.Context, results []*FetchResult)
 }
 
 func (s *Scheduler) sendDigestAndMarkSeen(ctx context.Context, cfg *store.Config, feedGroups []email.FeedGroup, totalNew int, results []*FetchResult) error {
+	s.logger.Debug("sendDigestAndMarkSeen: start", "totalNew", totalNew)
 	digestData := &email.DigestData{
 		ConfigName: cfg.Filename,
 		TotalItems: totalNew,
@@ -316,16 +354,19 @@ func (s *Scheduler) sendDigestAndMarkSeen(ctx context.Context, cfg *store.Config
 		inline = false
 	}
 
+	s.logger.Debug("sendDigestAndMarkSeen: rendering digest")
 	htmlBody, textBody, err := email.RenderDigest(digestData, inline)
 	if err != nil {
 		return fmt.Errorf("render digest: %w", err)
 	}
+	s.logger.Debug("sendDigestAndMarkSeen: digest rendered")
 
 	unsubToken, err := s.store.GetOrCreateUnsubscribeToken(ctx, cfg.ID)
 	if err != nil {
 		s.logger.Warn("failed to create unsubscribe token", "err", err)
 		unsubToken = ""
 	}
+	s.logger.Debug("sendDigestAndMarkSeen: got unsub token")
 
 	user, err := s.store.GetUserByID(ctx, cfg.UserID)
 	dashboardURL := ""
@@ -334,11 +375,13 @@ func (s *Scheduler) sendDigestAndMarkSeen(ctx context.Context, cfg *store.Config
 	} else {
 		s.logger.Warn("failed to get user for dashboard URL", "err", err)
 	}
+	s.logger.Debug("sendDigestAndMarkSeen: got dashboard URL")
 
 	// Rate limit email sending per user
 	if !s.rateLimiter.Allow(fmt.Sprintf("email:%d", cfg.UserID)) {
 		return fmt.Errorf("rate limit exceeded for email sending")
 	}
+	s.logger.Debug("sendDigestAndMarkSeen: rate limit ok")
 
 	// Begin transaction to mark items seen
 	tx, err := s.store.BeginTx(ctx)
@@ -346,6 +389,7 @@ func (s *Scheduler) sendDigestAndMarkSeen(ctx context.Context, cfg *store.Config
 		return fmt.Errorf("begin transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	s.logger.Debug("sendDigestAndMarkSeen: transaction started")
 
 	// Mark items seen BEFORE sending email
 	for _, result := range results {
@@ -358,20 +402,31 @@ func (s *Scheduler) sendDigestAndMarkSeen(ctx context.Context, cfg *store.Config
 			}
 		}
 	}
+	s.logger.Debug("sendDigestAndMarkSeen: items marked seen")
 
-	// Send email - if this fails, transaction will rollback
-	subject := "feed digest"
-	
-	// Record email send with tracking
-	trackingToken, err := s.store.RecordEmailSend(cfg.ID, cfg.Email, subject, true)
+	// Generate tracking token BEFORE recording (needed for email pixel URL)
+	trackingToken, err := s.store.GenerateTrackingToken()
 	if err != nil {
-		s.logger.Warn("failed to record email send", "err", err)
+		s.logger.Warn("failed to generate tracking token", "err", err)
 		trackingToken = ""
 	}
+	s.logger.Debug("sendDigestAndMarkSeen: generated tracking token")
+
+	// Record email send with tracking (within transaction)
+	subject := "feed digest"
+	s.logger.Debug("sendDigestAndMarkSeen: recording email send")
+	if err := s.store.RecordEmailSendTx(tx, cfg.ID, cfg.Email, subject, trackingToken); err != nil {
+		s.logger.Warn("failed to record email send", "err", err)
+	}
+	s.logger.Debug("sendDigestAndMarkSeen: recorded email send")
 	
+	// Send email - if this fails, transaction will rollback
+	s.logger.Debug("sendDigestAndMarkSeen: calling mailer.Send", "to", cfg.Email)
 	if err := s.mailer.Send(cfg.Email, subject, htmlBody, textBody, unsubToken, dashboardURL, trackingToken); err != nil {
+		s.logger.Error("sendDigestAndMarkSeen: mailer.Send failed", "err", err)
 		return fmt.Errorf("send email: %w", err)
 	}
+	s.logger.Debug("sendDigestAndMarkSeen: mailer.Send returned successfully")
 
 	// Commit transaction only after successful email send
 	if err := tx.Commit(); err != nil {
@@ -394,7 +449,7 @@ func (s *Scheduler) processConfig(ctx context.Context, cfg *store.Config) error 
 		return nil
 	}
 
-	results := FetchFeeds(ctx, feeds)
+	results := FetchFeeds(ctx, feeds, nil) // No progress tracking for background jobs
 
 	feedGroups, totalNew, err := s.collectNewItems(ctx, results)
 	if err != nil {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
@@ -175,15 +176,24 @@ func handleRun(ctx context.Context, sess ssh.Session, user *store.User, st *stor
 		return
 	}
 
-	// Simple spinner animation
+	// Get feed count for progress display
+	feeds, err := st.GetFeedsByConfig(ctx, cfg.ID)
+	if err != nil {
+		println(sess, errorStyle.Render("Error: "+err.Error()))
+		return
+	}
+	totalFeeds := len(feeds)
+
+	// Progress tracking
+	var progress atomic.Int32
 	spinChars := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 	done := make(chan struct{})
 	result := make(chan struct {
-		items int
+		stats *scheduler.RunStats
 		err   error
 	})
 
-	// Spinner goroutine
+	// Spinner goroutine with real-time progress
 	go func() {
 		i := 0
 		for {
@@ -191,7 +201,8 @@ func handleRun(ctx context.Context, sess ssh.Session, user *store.User, st *stor
 			case <-done:
 				return
 			default:
-				printf(sess, "\r%s Fetching feeds...", spinChars[i%len(spinChars)])
+				completed := progress.Load()
+				printf(sess, "\r%s Fetching feeds... %d/%d", spinChars[i%len(spinChars)], completed, totalFeeds)
 				i++
 				time.Sleep(80 * time.Millisecond)
 			}
@@ -200,11 +211,11 @@ func handleRun(ctx context.Context, sess ssh.Session, user *store.User, st *stor
 
 	// Work goroutine
 	go func() {
-		newItems, err := sched.RunNow(ctx, cfg.ID)
+		stats, err := sched.RunNow(ctx, cfg.ID, &progress)
 		result <- struct {
-			items int
+			stats *scheduler.RunStats
 			err   error
-		}{items: newItems, err: err}
+		}{stats: stats, err: err}
 	}()
 
 	// Wait for result
@@ -217,10 +228,30 @@ func handleRun(ctx context.Context, sess ssh.Session, user *store.User, st *stor
 		return
 	}
 
-	if res.items == 0 {
-		println(sess, dimStyle.Render("No new items found."))
-	} else {
-		println(sess, successStyle.Render(fmt.Sprintf("Sent %d new item(s) to %s", res.items, cfg.Email)))
+	// Display detailed stats
+	if res.stats != nil {
+		if res.stats.FailedFeeds > 0 {
+			printf(sess, "%s Fetched %d/%d feeds (%d failed)\n",
+				dimStyle.Render("⚠"),
+				res.stats.FetchedFeeds,
+				res.stats.TotalFeeds,
+				res.stats.FailedFeeds)
+		} else {
+			printf(sess, "%s Fetched %d/%d feeds\n",
+				successStyle.Render("✓"),
+				res.stats.FetchedFeeds,
+				res.stats.TotalFeeds)
+		}
+
+		if res.stats.NewItems == 0 {
+			println(sess, dimStyle.Render("No new items found."))
+		} else {
+			if res.stats.EmailSent {
+				println(sess, successStyle.Render(fmt.Sprintf("Sent %d new item(s) to %s", res.stats.NewItems, cfg.Email)))
+			} else {
+				println(sess, dimStyle.Render(fmt.Sprintf("Found %d new item(s) but did not send email", res.stats.NewItems)))
+			}
+		}
 	}
 }
 

@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"encoding/xml"
@@ -89,6 +90,9 @@ func (s *Server) handleUser(w http.ResponseWriter, r *http.Request, fingerprint 
 		if errors.Is(err, sql.ErrNoRows) {
 			s.handle404(w, r)
 			return
+		}
+		if errors.Is(err, context.Canceled) {
+			return // Client disconnected, don't log as error
 		}
 		s.logger.Warn("get user", "err", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
@@ -229,6 +233,9 @@ func (s *Server) handleFeedXML(w http.ResponseWriter, r *http.Request, fingerpri
 			s.handle404(w, r)
 			return
 		}
+		if errors.Is(err, context.Canceled) {
+			return // Client disconnected
+		}
 		s.logger.Warn("get user", "err", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
@@ -358,6 +365,9 @@ func (s *Server) handleFeedJSON(w http.ResponseWriter, r *http.Request, fingerpr
 			s.handle404(w, r)
 			return
 		}
+		if errors.Is(err, context.Canceled) {
+			return // Client disconnected
+		}
 		s.logger.Warn("get user", "err", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
@@ -463,6 +473,9 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request, fingerprin
 		if errors.Is(err, sql.ErrNoRows) {
 			s.handle404(w, r)
 			return
+		}
+		if errors.Is(err, context.Canceled) {
+			return // Client disconnected
 		}
 		s.logger.Warn("get user", "err", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)

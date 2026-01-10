@@ -130,6 +130,20 @@ func runServer(ctx context.Context) error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
+	// Set log level from config
+	level := log.InfoLevel
+	switch strings.ToLower(cfg.LogLevel) {
+	case "debug":
+		level = log.DebugLevel
+	case "info":
+		level = log.InfoLevel
+	case "warn":
+		level = log.WarnLevel
+	case "error":
+		level = log.ErrorLevel
+	}
+	logger.SetLevel(level)
+
 	logger.Info("starting herald",
 		"ssh_port", cfg.SSHPort,
 		"http_port", cfg.HTTPPort,
