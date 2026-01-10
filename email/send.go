@@ -138,12 +138,22 @@ func (m *Mailer) Send(to, subject, htmlBody, textBody, unsubToken, dashboardURL 
 	headers["MIME-Version"] = "1.0"
 	headers["Content-Type"] = fmt.Sprintf("multipart/alternative; boundary=%q", boundary)
 
-	// Add RFC 8058 unsubscribe headers
+	// RFC 2369 list headers
+	headers["List-Id"] = fmt.Sprintf("<herald.%s>", m.cfg.Host)
+	headers["List-Archive"] = fmt.Sprintf("<%s>", dashboardURL)
+	headers["List-Post"] = "NO"
+
+	// RFC 8058 unsubscribe headers
 	if unsubToken != "" {
 		unsubURL := m.unsubBaseURL + "/unsubscribe/" + unsubToken
 		headers["List-Unsubscribe"] = fmt.Sprintf("<%s>", unsubURL)
 		headers["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
 	}
+
+	// Bulk mail and auto-generated headers for better deliverability
+	headers["Precedence"] = "bulk"
+	headers["Auto-Submitted"] = "auto-generated"
+	headers["X-Mailer"] = "Herald"
 
 	var msg strings.Builder
 	for k, v := range headers {

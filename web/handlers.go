@@ -514,6 +514,40 @@ func (s *Server) handleUnsubscribePOST(w http.ResponseWriter, r *http.Request, t
 		return
 	}
 
+	// RFC 8058: Check for one-click unsubscribe format
+	oneClick := r.FormValue("List-Unsubscribe")
+	if oneClick == "One-Click" {
+		// One-click unsubscribe: deactivate config without rendering HTML
+		cfg, err := s.store.GetConfigByToken(ctx, token)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				http.Error(w, "Invalid token", http.StatusNotFound)
+				return
+			}
+			s.logger.Error("get config by token", "err", err)
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+
+		if err := s.store.DeactivateConfig(ctx, cfg.ID); err != nil {
+			s.logger.Error("deactivate config", "err", err)
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+
+		if err := s.store.DeleteToken(ctx, token); err != nil {
+			s.logger.Warn("delete token", "err", err)
+		}
+
+		s.logger.Info("config deactivated via one-click", "config_id", cfg.ID, "filename", cfg.Filename)
+
+		// RFC 8058: Return success without redirect
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("Unsubscribed"))
+		return
+	}
+
+	// Manual unsubscribe flow
 	action := r.FormValue("action")
 	if action != "deactivate" && action != "delete" {
 		http.Error(w, "Invalid action", http.StatusBadRequest)
