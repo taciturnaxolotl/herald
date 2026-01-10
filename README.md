@@ -42,6 +42,19 @@ Upload via SCP:
 scp feeds.txt user@herald.dunkirk.sh:
 ```
 
+### SSH Configuration
+
+Add this to your `~/.ssh/config` for easier access:
+
+```ssh-config
+Host herald
+    HostName herald.dunkirk.sh
+    Port 2223
+    User herald
+```
+
+Then use: `scp feeds.txt herald:` and `ssh herald ls`
+
 ### SSH Commands
 
 ```bash
