@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"mime"
+	"mime/quotedprintable"
 	"net"
 	"net/smtp"
 	"strings"
@@ -46,13 +47,15 @@ func (m *Mailer) Send(to, subject, htmlBody, textBody string) error {
 	msg.WriteString(fmt.Sprintf("--%s\r\n", boundary))
 	msg.WriteString("Content-Type: text/plain; charset=utf-8\r\n")
 	msg.WriteString("Content-Transfer-Encoding: quoted-printable\r\n\r\n")
-	msg.WriteString(textBody)
+	textQP := encodeQuotedPrintable(textBody)
+	msg.WriteString(textQP)
 	msg.WriteString("\r\n")
 
 	msg.WriteString(fmt.Sprintf("--%s\r\n", boundary))
 	msg.WriteString("Content-Type: text/html; charset=utf-8\r\n")
 	msg.WriteString("Content-Transfer-Encoding: quoted-printable\r\n\r\n")
-	msg.WriteString(htmlBody)
+	htmlQP := encodeQuotedPrintable(htmlBody)
+	msg.WriteString(htmlQP)
 	msg.WriteString("\r\n")
 
 	msg.WriteString(fmt.Sprintf("--%s--\r\n", boundary))
@@ -67,6 +70,14 @@ func (m *Mailer) Send(to, subject, htmlBody, textBody string) error {
 	}
 
 	return smtp.SendMail(addr, auth, m.cfg.From, []string{to}, []byte(msg.String()))
+}
+
+func encodeQuotedPrintable(s string) string {
+	var buf strings.Builder
+	w := quotedprintable.NewWriter(&buf)
+	w.Write([]byte(s))
+	w.Close()
+	return buf.String()
 }
 
 func (m *Mailer) sendWithTLS(addr string, auth smtp.Auth, to, msg string) error {

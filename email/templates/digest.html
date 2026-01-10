@@ -4,49 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
-body {
-    font-family: monospace;
-    margin: 0;
-    padding: 20px;
-    line-height: 1.6;
-    max-width: 600px;
-}
-a {
-    word-wrap: break-word;
-}
-h1 {
-    font-size: 16px;
-    font-weight: bold;
-    margin: 20px 0 5px 0;
-}
-h2 {
-    font-size: 14px;
-    font-weight: bold;
-    margin: 15px 0 10px 0;
-}
 img {
     max-width: 100%;
     height: auto;
 }
-.feed-url {
-    font-size: 14px;
-    margin-bottom: 10px;
-}
 .feeds {
     max-width: 100%;
-}
-.summary ul {
-    margin: 5px 0;
-    padding-left: 20px;
-}
-.summary li {
-    margin-bottom: 5px;
-}
-.item {
-    margin-bottom: 20px;
-}
-.item-content {
-    margin-top: 10px;
 }
 </style>
 </head>
@@ -54,7 +17,7 @@ img {
 <div class="feeds">
 {{range .FeedGroups}}
 <div style="margin-bottom: 10px;">
-<h1><a href="{{.FeedURL}}">{{.FeedName}}</a></h1>
+<h1 style="margin-bottom: 3px;"><a href="{{.FeedURL}}">{{.FeedName}}</a></h1>
 </div>
 
 <div class="summary">
@@ -64,15 +27,14 @@ img {
 <li><a href="{{.Link}}">{{.Title}}</a></li>
 </ul>
 {{end}}
-<hr />
 </div>
 
 {{if $.Inline}}
 <div>
 {{range .Items}}
-<div class="item">
+<div>
 <h1><a href="{{.Link}}">{{.Title}}</a></h1>
-<div class="item-content">{{.Content}}</div>
+<div>{{.Content}}</div>
 </div>
 <hr />
 {{end}}
