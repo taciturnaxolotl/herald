@@ -73,6 +73,7 @@ ssh herald.dunkirk.sh logs
 Visit `http://localhost:8080` for the landing page.
 
 After uploading a config, run `ssh herald.dunkirk.sh` to get your fingerprint, then visit:
+
 - `http://localhost:8080/{fingerprint}` - Your dashboard with config status
 - `http://localhost:8080/{fingerprint}/feeds.xml` - RSS feed for feeds.txt
 - `http://localhost:8080/{fingerprint}/feeds.json` - JSON feed for feeds.txt
@@ -81,13 +82,13 @@ After uploading a config, run `ssh herald.dunkirk.sh` to get your fingerprint, t
 
 ### Directives
 
-| Directive           | Required | Description                                      |
-| ------------------- | -------- | ------------------------------------------------ |
-| `=: email <addr>`   | Yes      | Recipient email address                          |
-| `=: cron <expr>`    | Yes      | Standard cron expression (5 fields)              |
-| `=: digest <bool>`  | No       | Combine all items into one email (default: true) |
+| Directive           | Required | Description                                       |
+| ------------------- | -------- | ------------------------------------------------- |
+| `=: email <addr>`   | Yes      | Recipient email address                           |
+| `=: cron <expr>`    | Yes      | Standard cron expression (5 fields)               |
+| `=: digest <bool>`  | No       | Combine all items into one email (default: true)  |
 | `=: inline <bool>`  | No       | Include article content in email (default: false) |
-| `=> <url> ["name"]` | Yes (1+) | RSS/Atom feed URL, optional display name         |
+| `=> <url> ["name"]` | Yes (1+) | RSS/Atom feed URL, optional display name          |
 
 ## Configuration
 
@@ -133,4 +134,5 @@ Environment variables can also be used:
 
 <p align="center">
     <a href="https://tangled.org/dunkirk.sh/herald/blob/main/LICENSE.md"><img src="https://img.shields.io/static/v1.svg?style=for-the-badge&label=License&message=O'Saasy&logoColor=d9e0ee&colorA=363a4f&colorB=b7bdf8"/></a>
+    <a href="https://codecov.io/gh/taciturnaxolotl/harold"><img src="https://img.shields.io/codecov/c/github/taciturnaxolotl/harold?style=for-the-badge&logoColor=d9e0ee&colorA=363a4f&colorB=a6da95"/></a>
 </p>
