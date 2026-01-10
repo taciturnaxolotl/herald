@@ -704,7 +704,7 @@ func (s *Server) handleKeepAlive(w http.ResponseWriter, r *http.Request, token s
 	// Return success message
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, `<!DOCTYPE html>
+	if _, err := fmt.Fprintf(w, `<!DOCTYPE html>
 <html>
 <head>
 	<meta charset="utf-8">
@@ -720,7 +720,9 @@ func (s *Server) handleKeepAlive(w http.ResponseWriter, r *http.Request, token s
 	<div class="success">✓ Success!</div>
 	<div class="details">Your digest will stay active until <strong>%s</strong>.</div>
 </body>
-</html>`, expiresAt)
+</html>`, expiresAt); err != nil {
+		s.logger.Error("failed to write response", "error", err)
+	}
 }
 
 func (s *Server) handle404(w http.ResponseWriter, r *http.Request) {

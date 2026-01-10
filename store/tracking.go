@@ -9,16 +9,16 @@ import (
 )
 
 type EmailSend struct {
-	ID             int64
-	ConfigID       int64
-	Recipient      string
-	Subject        string
-	TrackingToken  string
-	SentAt         time.Time
-	Bounced        bool
-	BounceReason   sql.NullString
-	Opened         bool
-	OpenedAt       sql.NullTime
+	ID            int64
+	ConfigID      int64
+	Recipient     string
+	Subject       string
+	TrackingToken string
+	SentAt        time.Time
+	Bounced       bool
+	BounceReason  sql.NullString
+	Opened        bool
+	OpenedAt      sql.NullTime
 }
 
 // RecordEmailSend records an email send with optional tracking token
@@ -111,7 +111,7 @@ func (db *DB) GetInactiveConfigs(daysWithoutActivity int, minSends int) ([]int64
 	if err != nil {
 		return nil, fmt.Errorf("query inactive configs: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var configIDs []int64
 	for rows.Next() {
@@ -220,4 +220,3 @@ func (db *DB) UpdateLastActive(trackingToken string) error {
 
 	return nil
 }
-

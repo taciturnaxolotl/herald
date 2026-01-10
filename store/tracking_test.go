@@ -8,7 +8,11 @@ import (
 
 func TestEmailTracking(t *testing.T) {
 	db := setupTestDB(t)
-	defer db.Close()
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Errorf("failed to close db: %v", err)
+		}
+	}()
 
 	ctx := context.Background()
 

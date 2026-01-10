@@ -20,16 +20,16 @@ const (
 	emailsPerSecondPerUser = emailsPerMinutePerUser / 60.0
 
 	// Cleanup intervals
-	cleanupInterval    = 24 * time.Hour
-	seenItemsRetention = 6 * 30 * 24 * time.Hour // 6 months
-	itemMaxAge         = 3 * 30 * 24 * time.Hour // 3 months
-	emailSendsRetention = 6 * 30 // 6 months in days
+	cleanupInterval     = 24 * time.Hour
+	seenItemsRetention  = 6 * 30 * 24 * time.Hour // 6 months
+	itemMaxAge          = 3 * 30 * 24 * time.Hour // 3 months
+	emailSendsRetention = 6 * 30                  // 6 months in days
 
 	// Item limits
 	minItemsForDigest = 5
 
 	// Engagement tracking
-	inactivityThreshold = 90  // days without opens
+	inactivityThreshold      = 90 // days without opens
 	minSendsBeforeDeactivate = 3  // minimum sends before considering deactivation
 )
 
@@ -425,13 +425,13 @@ func (s *Scheduler) sendDigestAndMarkSeen(ctx context.Context, cfg *store.Config
 		s.logger.Warn("failed to record email send", "err", err)
 	}
 	s.logger.Debug("sendDigestAndMarkSeen: recorded email send")
-	
+
 	// Build keep-alive URL
 	keepAliveURL := ""
 	if trackingToken != "" {
 		keepAliveURL = s.originURL + "/keep-alive/" + trackingToken
 	}
-	
+
 	// Send email - if this fails, transaction will rollback
 	s.logger.Debug("sendDigestAndMarkSeen: calling mailer.Send", "to", cfg.Email)
 	if err := s.mailer.Send(cfg.Email, subject, htmlBody, textBody, unsubToken, dashboardURL, keepAliveURL); err != nil {
