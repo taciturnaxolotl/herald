@@ -43,6 +43,9 @@ scp feeds.txt user@herald.dunkirk.sh:
 ### SSH Commands
 
 ```bash
+# Get your fingerprint (for web dashboard)
+ssh herald.dunkirk.sh
+
 # List your configs
 ssh herald.dunkirk.sh ls
 
@@ -51,6 +54,10 @@ ssh herald.dunkirk.sh cat feeds.txt
 
 # Delete a config
 ssh herald.dunkirk.sh rm feeds.txt
+
+# Activate/deactivate configs
+ssh herald.dunkirk.sh activate feeds.txt
+ssh herald.dunkirk.sh deactivate feeds.txt
 
 # Run immediately (don't wait for cron)
 ssh herald.dunkirk.sh run feeds.txt
@@ -61,7 +68,12 @@ ssh herald.dunkirk.sh logs
 
 ### Web Interface
 
-Visit `http://localhost:8080` for the landing page, or `http://localhost:8080/{fingerprint}` for your user page with aggregated RSS/JSON feeds.
+Visit `http://localhost:8080` for the landing page.
+
+After uploading a config, run `ssh herald.dunkirk.sh` to get your fingerprint, then visit:
+- `http://localhost:8080/{fingerprint}` - Your dashboard with config status
+- `http://localhost:8080/{fingerprint}/feeds.xml` - RSS feed for feeds.txt
+- `http://localhost:8080/{fingerprint}/feeds.json` - JSON feed for feeds.txt
 
 ## Config Format
 

@@ -31,6 +31,11 @@
     # Upload a config
     scp {{if ne .SSHPort 22}}-P {{.SSHPort}} {{end}}feeds.txt herald@{{.SSHHost}}:
 
+    # Get your fingerprint (for web dashboard)
+    # Your dashboard will be at:
+    # {{.Origin}}/&lt;fingerprint&gt;
+    ssh {{if ne .SSHPort 22}}-p {{.SSHPort}} {{end}}herald@{{.SSHHost}}
+
     # Check status
     ssh {{if ne .SSHPort 22}}-p {{.SSHPort}} {{end}}herald@{{.SSHHost}} ls
 
