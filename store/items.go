@@ -93,3 +93,63 @@ func (db *DB) GetSeenItems(ctx context.Context, feedID int64, limit int) ([]*See
 	}
 	return items, rows.Err()
 }
+
+// GetSeenGUIDs returns a set of GUIDs that have been seen for a given feed
+func (db *DB) GetSeenGUIDs(ctx context.Context, feedID int64, guids []string) (map[string]bool, error) {
+	if len(guids) == 0 {
+		return make(map[string]bool), nil
+	}
+
+	// Build the query with the appropriate number of placeholders
+	args := make([]interface{}, 0, len(guids)+1)
+	args = append(args, feedID)
+	
+	placeholders := "?"
+	for i := 0; i < len(guids)-1; i++ {
+		placeholders += ",?"
+	}
+	for _, guid := range guids {
+		args = append(args, guid)
+	}
+
+	query := fmt.Sprintf(
+		`SELECT guid FROM seen_items WHERE feed_id = ? AND guid IN (%s)`,
+		placeholders,
+	)
+
+	rows, err := db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query seen guids: %w", err)
+	}
+	defer rows.Close()
+
+	seenSet := make(map[string]bool)
+	for rows.Next() {
+		var guid string
+		if err := rows.Scan(&guid); err != nil {
+			return nil, fmt.Errorf("scan guid: %w", err)
+		}
+		seenSet[guid] = true
+	}
+	
+	return seenSet, rows.Err()
+}
+
+// CleanupOldSeenItems deletes seen items older than the specified duration
+func (db *DB) CleanupOldSeenItems(ctx context.Context, olderThan time.Duration) (int64, error) {
+	cutoff := time.Now().Add(-olderThan)
+	result, err := db.ExecContext(ctx,
+		`DELETE FROM seen_items WHERE seen_at < ?`,
+		cutoff,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("cleanup old seen items: %w", err)
+	}
+	
+	deleted, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("get rows affected: %w", err)
+	}
+	
+	return deleted, nil
+}

@@ -9,11 +9,11 @@
 - ✅ #14: No Rate Limiting (SSH, SCP, web, email)
 - ✅ #15: Token Generation (verify crypto/rand usage)
 
-## **P1 - High (Performance & Reliability)**
+## **P1 - High (Performance & Reliability)** ✅ COMPLETE
 
-- #8: N+1 Query Problem (batch operations)
-- #26: No Cleanup of Old seen_items (6 month cleanup job)
-- #23: Missing Graceful Shutdown for Scheduler (panic recovery)
+- ✅ #8: N+1 Query Problem (batch operations)
+- ✅ #26: No Cleanup of Old seen_items (6 month cleanup job)
+- ✅ #23: Missing Graceful Shutdown for Scheduler (panic recovery)
 
 ## **P2 - Medium (Code Quality & UX)**
 
@@ -115,19 +115,18 @@ While you set a 30s timeout on the context, the HTTP client also has a separate 
 
 ## **Performance Issues**
 
-### 8. **N+1 Query Problem** 🐌
+### 8. **N+1 Query Problem** ✅
 
 **Location:** Multiple locations
 
 - `web/handlers.go:99-103` - Gets feeds for each config in a loop
 - `scheduler/scheduler.go` - Checks each item individually for seen status
 
-**Fix:** Batch operations:
-
-```go
-// Instead of checking each item individually
-seenGuids, err := s.store.GetSeenGUIDs(ctx, feedID, itemGUIDs)
-```
+**Fixed:** 
+- Added `GetSeenGUIDs()` batch method in `store/items.go` to check multiple items at once
+- Added `GetFeedsByConfigs()` batch method in `store/feeds.go` to fetch feeds for multiple configs
+- Updated `scheduler/scheduler.go:collectNewItems()` to use batch GUID checking
+- Updated `web/handlers.go` dashboard handler to batch fetch all feeds
 
 ### 9. **No Prepared Statements** 📝
 
@@ -233,13 +232,14 @@ Either remove the context parameter or pass it to a context-aware migrate functi
 
 Some errors are `logger.Error`, some are `logger.Warn`. For example, feed fetch errors are `Warn` (line 89 of scheduler.go) but other errors are `Error`. Establish consistent criteria.
 
-### 23. **Missing Graceful Shutdown for Scheduler** 🛑
+### 23. **Missing Graceful Shutdown for Scheduler** ✅
 
 **Location:** `main.go:194-197`
 
-The scheduler runs in a goroutine with errgroup, but `Start()` only returns on context cancellation. If scheduler panics, errgroup won't capture it.
-
-**Fix:** Add defer recover in scheduler or use errgroup.Go properly.
+**Fixed:**
+- Added panic recovery with defer in `scheduler/scheduler.go:tick()` 
+- Added panic recovery wrapper in `main.go` scheduler goroutine
+- Added panic recovery in cleanup job
 
 ---
 
@@ -253,15 +253,13 @@ No Prometheus metrics, no health check endpoint, no structured logging for monit
 
 You log `"email sent"` but don't verify SMTP actually accepted it (some SMTP servers queue and fail later).
 
-### 26. **No Cleanup of Old seen_items** 🧹
+### 26. **No Cleanup of Old seen_items** ✅
 
-The `seen_items` table will grow indefinitely. With the 3-month filter, items older than 3 months can be safely deleted.
-
-**Fix:** Add periodic cleanup job:
-
-```go
-DELETE FROM seen_items WHERE seen_at < datetime('now', '-6 months')
-```
+**Fixed:**
+- Added `CleanupOldSeenItems()` method in `store/items.go` to delete items older than specified duration
+- Added cleanup ticker in `scheduler/scheduler.go:Start()` that runs every 24 hours
+- Cleanup runs on startup and then daily, removing items older than 6 months
+- Added logging for cleanup operations showing number of items deleted
 
 ### 27. **No Feed Validation on Upload** 🔍
 

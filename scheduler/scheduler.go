@@ -36,7 +36,14 @@ func (s *Scheduler) Start(ctx context.Context) {
 	ticker := time.NewTicker(s.interval)
 	defer ticker.Stop()
 
+	// Cleanup ticker runs every 24 hours
+	cleanupTicker := time.NewTicker(24 * time.Hour)
+	defer cleanupTicker.Stop()
+
 	s.logger.Info("scheduler started", "interval", s.interval)
+
+	// Run cleanup on start
+	s.cleanupOldSeenItems(ctx)
 
 	for {
 		select {
@@ -45,11 +52,37 @@ func (s *Scheduler) Start(ctx context.Context) {
 			return
 		case <-ticker.C:
 			s.tick(ctx)
+		case <-cleanupTicker.C:
+			s.cleanupOldSeenItems(ctx)
 		}
 	}
 }
 
+func (s *Scheduler) cleanupOldSeenItems(ctx context.Context) {
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.Error("panic during cleanup", "panic", r)
+		}
+	}()
+
+	// Delete items older than 6 months
+	deleted, err := s.store.CleanupOldSeenItems(ctx, 6*30*24*time.Hour)
+	if err != nil {
+		s.logger.Error("failed to cleanup old seen items", "err", err)
+		return
+	}
+	if deleted > 0 {
+		s.logger.Info("cleaned up old seen items", "deleted", deleted)
+	}
+}
+
 func (s *Scheduler) tick(ctx context.Context) {
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.Error("panic during tick", "panic", r)
+		}
+	}()
+
 	now := time.Now()
 	configs, err := s.store.GetDueConfigs(ctx, now)
 	if err != nil {
@@ -131,19 +164,30 @@ func (s *Scheduler) collectNewItems(ctx context.Context, results []*FetchResult)
 			continue
 		}
 
+		// Collect all GUIDs for this feed to batch check
+		var guids []string
+		for _, item := range result.Items {
+			if !item.Published.IsZero() && item.Published.Before(threeMonthsAgo) {
+				continue
+			}
+			guids = append(guids, item.GUID)
+		}
+
+		// Batch check which items have been seen
+		seenSet, err := s.store.GetSeenGUIDs(ctx, result.FeedID, guids)
+		if err != nil {
+			s.logger.Warn("failed to check seen items", "err", err)
+			continue
+		}
+
+		// Collect new items
 		var newItems []email.FeedItem
 		for _, item := range result.Items {
 			if !item.Published.IsZero() && item.Published.Before(threeMonthsAgo) {
 				continue
 			}
 
-			seen, err := s.store.IsItemSeen(ctx, result.FeedID, item.GUID)
-			if err != nil {
-				s.logger.Warn("failed to check if item seen", "err", err)
-				continue
-			}
-
-			if !seen {
+			if !seenSet[item.GUID] {
 				newItems = append(newItems, email.FeedItem{
 					Title:     item.Title,
 					Link:      item.Link,

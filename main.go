@@ -192,6 +192,11 @@ func runServer(ctx context.Context) error {
 	})
 
 	g.Go(func() error {
+		defer func() {
+			if r := recover(); r != nil {
+				logger.Error("scheduler panic", "panic", r)
+			}
+		}()
 		sched.Start(ctx)
 		return nil
 	})

@@ -91,16 +91,24 @@ func (s *Server) handleUser(w http.ResponseWriter, r *http.Request, fingerprint 
 		return
 	}
 
+	// Batch fetch all feeds for all configs
+	configIDs := make([]int64, len(configs))
+	for i, cfg := range configs {
+		configIDs[i] = cfg.ID
+	}
+	feedsByConfig, err := s.store.GetFeedsByConfigs(ctx, configIDs)
+	if err != nil {
+		s.logger.Error("get feeds by configs", "err", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
 	var configInfos []configInfo
 	var earliestNextRun time.Time
 	hasAnyActive := false
 
 	for _, cfg := range configs {
-		feeds, err := s.store.GetFeedsByConfig(ctx, cfg.ID)
-		if err != nil {
-			s.logger.Error("get feeds", "err", err)
-			continue
-		}
+		feeds := feedsByConfig[cfg.ID]
 
 		isActive := cfg.NextRun.Valid
 		if isActive {

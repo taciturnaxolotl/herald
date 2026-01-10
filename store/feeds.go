@@ -93,6 +93,46 @@ func (db *DB) GetFeedsByConfig(ctx context.Context, configID int64) ([]*Feed, er
 	return feeds, rows.Err()
 }
 
+// GetFeedsByConfigs returns a map of configID to feeds for multiple configs in a single query
+func (db *DB) GetFeedsByConfigs(ctx context.Context, configIDs []int64) (map[int64][]*Feed, error) {
+	if len(configIDs) == 0 {
+		return make(map[int64][]*Feed), nil
+	}
+
+	// Build the query with the appropriate number of placeholders
+	args := make([]interface{}, len(configIDs))
+	placeholders := "?"
+	for i := 0; i < len(configIDs)-1; i++ {
+		placeholders += ",?"
+	}
+	for i, id := range configIDs {
+		args[i] = id
+	}
+
+	query := fmt.Sprintf(
+		`SELECT id, config_id, url, name, last_fetched, etag, last_modified
+		 FROM feeds WHERE config_id IN (%s) ORDER BY config_id, id`,
+		placeholders,
+	)
+
+	rows, err := db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query feeds: %w", err)
+	}
+	defer rows.Close()
+
+	feedMap := make(map[int64][]*Feed)
+	for rows.Next() {
+		var f Feed
+		if err := rows.Scan(&f.ID, &f.ConfigID, &f.URL, &f.Name, &f.LastFetched, &f.ETag, &f.LastModified); err != nil {
+			return nil, fmt.Errorf("scan feed: %w", err)
+		}
+		feedMap[f.ConfigID] = append(feedMap[f.ConfigID], &f)
+	}
+	
+	return feedMap, rows.Err()
+}
+
 func (db *DB) UpdateFeedFetched(ctx context.Context, feedID int64, etag, lastModified string) error {
 	var etagVal, lmVal sql.NullString
 	if etag != "" {
