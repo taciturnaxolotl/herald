@@ -15,6 +15,8 @@ import (
 const (
 	maxFeedItems          = 100
 	shortFingerprintLen   = 8
+	recentItemsLimit      = 50
+	feedCacheMaxAge       = 300 // 5 minutes
 )
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
@@ -275,7 +277,7 @@ func (s *Server) handleFeedXML(w http.ResponseWriter, r *http.Request, fingerpri
 
 	// Add caching headers
 	w.Header().Set("Content-Type", "application/rss+xml; charset=utf-8")
-	w.Header().Set("Cache-Control", "public, max-age=300")
+	w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", feedCacheMaxAge))
 	if cfg.LastRun.Valid {
 		etag := fmt.Sprintf(`"%s-%d"`, fingerprint[:shortFingerprintLen], cfg.LastRun.Time.Unix())
 		w.Header().Set("ETag", etag)
@@ -356,7 +358,7 @@ func (s *Server) handleFeedJSON(w http.ResponseWriter, r *http.Request, fingerpr
 	}
 	
 	for _, feed := range feeds {
-		seenItems, err := s.store.GetSeenItems(ctx, feed.ID, 50)
+		seenItems, err := s.store.GetSeenItems(ctx, feed.ID, recentItemsLimit)
 		if err != nil {
 			continue
 		}
@@ -402,7 +404,7 @@ func (s *Server) handleFeedJSON(w http.ResponseWriter, r *http.Request, fingerpr
 
 	// Add caching headers
 	w.Header().Set("Content-Type", "application/feed+json; charset=utf-8")
-	w.Header().Set("Cache-Control", "public, max-age=300")
+	w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", feedCacheMaxAge))
 	if cfg.LastRun.Valid {
 		etag := fmt.Sprintf(`"%s-%d"`, fingerprint[:shortFingerprintLen], cfg.LastRun.Time.Unix())
 		w.Header().Set("ETag", etag)

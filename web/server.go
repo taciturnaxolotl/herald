@@ -17,6 +17,12 @@ import (
 //go:embed templates/*
 var templatesFS embed.FS
 
+const (
+	// HTTP rate limiting
+	httpRequestsPerSecond = 10
+	httpRateLimiterBurst  = 20
+)
+
 type Server struct {
 	store       *store.DB
 	addr        string
@@ -39,7 +45,7 @@ func NewServer(st *store.DB, addr string, origin string, sshPort int, logger *lo
 		logger:      logger,
 		tmpl:        tmpl,
 		commitHash:  commitHash,
-		rateLimiter: ratelimit.New(10, 20), // 10 req/sec, burst of 20
+		rateLimiter: ratelimit.New(httpRequestsPerSecond, httpRateLimiterBurst),
 		metrics:     NewMetrics(),
 	}
 }

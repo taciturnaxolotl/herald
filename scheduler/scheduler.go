@@ -14,8 +14,9 @@ import (
 
 const (
 	// Email rate limiting
-	emailsPerMinutePerUser = 1
-	emailRateBurst         = 1
+	emailsPerMinutePerUser   = 1
+	emailRateBurst           = 1
+	emailsPerSecondPerUser   = emailsPerMinutePerUser / 60.0
 
 	// Cleanup intervals
 	cleanupInterval     = 24 * time.Hour
@@ -42,7 +43,7 @@ func NewScheduler(st *store.DB, mailer *email.Mailer, logger *log.Logger, interv
 		logger:      logger,
 		interval:    interval,
 		originURL:   originURL,
-		rateLimiter: ratelimit.New(1.0/60.0, emailRateBurst),
+		rateLimiter: ratelimit.New(emailsPerSecondPerUser, emailRateBurst),
 	}
 }
 
