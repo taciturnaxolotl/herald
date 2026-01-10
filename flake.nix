@@ -19,6 +19,7 @@
             gotools
             gopls
             delve
+            goreleaser
           ];
 
           shellHook = ''

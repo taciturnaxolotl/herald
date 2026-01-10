@@ -1,6 +1,9 @@
 # Binary
 herald
 
+# Build artifacts
+dist/
+
 # Config
 config.yaml
 *.pem
