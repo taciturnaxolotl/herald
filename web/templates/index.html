@@ -31,6 +31,25 @@
     herald - RSS-to-Email via SSH
 </pre>
 
+<h2>FILE FORMAT</h2>
+<pre>
+    Feed configs are plain text files with directives:
+
+    =: email you@example.com       Recipient email address
+    =: cron 0 8 * * *               Standard cron (5 fields)
+    =: digest true                  Combine items (default: true)
+    =: inline false                 Include content (default: false)
+    =&gt; https://example.com/feed     RSS/Atom feed URL
+    =&gt; https://blog.com/rss "Blog"  Feed with display name
+
+    Example feeds.txt:
+    =: email you@example.com
+    =: cron 0 8 * * *
+    =: digest true
+    =&gt; https://dunkirk.sh/atom.xml
+    =&gt; https://news.ycombinator.com/rss
+</pre>
+
 <h2>COMMANDS</h2>
 <pre>
     ls                  List uploaded feed configs
