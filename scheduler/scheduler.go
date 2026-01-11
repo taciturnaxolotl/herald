@@ -179,7 +179,7 @@ func (s *Scheduler) tick(ctx context.Context) {
 		}
 	}()
 
-	now := time.Now()
+	now := time.Now().UTC()
 	configs, err := s.store.GetDueConfigs(ctx, now)
 	if err != nil {
 		s.logger.Error("failed to get due configs", "err", err)
@@ -257,8 +257,8 @@ func (s *Scheduler) RunNow(ctx context.Context, configID int64, progress *atomic
 	s.logger.Debug("RunNow: feed metadata updated")
 
 	s.logger.Debug("RunNow: calculating next run")
-	now := time.Now()
-	nextRun, err := gronx.NextTick(cfg.CronExpr, false)
+	now := time.Now().UTC()
+	nextRun, err := gronx.NextTick(cfg.CronExpr, true)
 	if err != nil {
 		return stats, fmt.Errorf("calculate next run: %w", err)
 	}
@@ -277,7 +277,7 @@ func (s *Scheduler) RunNow(ctx context.Context, configID int64, progress *atomic
 func (s *Scheduler) collectNewItems(ctx context.Context, results []*FetchResult) ([]email.FeedGroup, int, error) {
 	var feedGroups []email.FeedGroup
 	totalNew := 0
-	maxAge := time.Now().Add(-itemMaxAge)
+	maxAge := time.Now().UTC().Add(-itemMaxAge)
 	feedErrors := 0
 
 	for _, result := range results {
@@ -486,8 +486,8 @@ func (s *Scheduler) processConfig(ctx context.Context, cfg *store.Config) error 
 		}
 	}
 
-	now := time.Now()
-	nextRun, err := gronx.NextTick(cfg.CronExpr, false)
+	now := time.Now().UTC()
+	nextRun, err := gronx.NextTick(cfg.CronExpr, true)
 	if err != nil {
 		return fmt.Errorf("calculate next run: %w", err)
 	}

@@ -182,7 +182,7 @@ func (h *scpHandler) Write(s ssh.Session, entry *scp.FileEntry) (int64, error) {
 }
 
 func calculateNextRun(cronExpr string) (time.Time, error) {
-	return gronx.NextTick(cronExpr, false)
+	return gronx.NextTick(cronExpr, true)
 }
 
 type configFileInfo struct {

@@ -49,7 +49,7 @@ func (db *DB) CreateConfig(ctx context.Context, userID int64, filename, email, c
 		InlineContent: inline,
 		RawText:       rawText,
 		NextRun:       sql.NullTime{Time: nextRun, Valid: true},
-		CreatedAt:     time.Now(),
+		CreatedAt:     time.Now().UTC(),
 	}, nil
 }
 
@@ -78,7 +78,7 @@ func (db *DB) CreateConfigTx(ctx context.Context, tx *sql.Tx, userID int64, file
 		InlineContent: inline,
 		RawText:       rawText,
 		NextRun:       sql.NullTime{Time: nextRun, Valid: true},
-		CreatedAt:     time.Now(),
+		CreatedAt:     time.Now().UTC(),
 	}, nil
 }
 
@@ -219,7 +219,7 @@ func (db *DB) ActivateConfig(ctx context.Context, userID int64, filename string)
 		return err
 	}
 
-	nextRun, err := gronx.NextTick(cfg.CronExpr, false)
+	nextRun, err := gronx.NextTick(cfg.CronExpr, true)
 	if err != nil {
 		return fmt.Errorf("calculate next run: %w", err)
 	}

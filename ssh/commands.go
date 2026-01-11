@@ -288,7 +288,7 @@ func handleLogs(ctx context.Context, sess ssh.Session, user *store.User, st *sto
 }
 
 func formatRelativeTime(t time.Time) string {
-	now := time.Now()
+	now := time.Now().UTC()
 	diff := t.Sub(now)
 
 	if diff < 0 {

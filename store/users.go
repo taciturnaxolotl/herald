@@ -42,7 +42,7 @@ func (db *DB) GetOrCreateUser(ctx context.Context, pubkeyFP, pubkey string) (*Us
 		ID:        id,
 		PubkeyFP:  pubkeyFP,
 		Pubkey:    pubkey,
-		CreatedAt: time.Now(),
+		CreatedAt: time.Now().UTC(),
 	}, nil
 }
 
