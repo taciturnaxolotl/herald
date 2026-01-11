@@ -18,6 +18,9 @@ import (
 //go:embed templates/*
 var templatesFS embed.FS
 
+//go:embed public/*
+var publicFS embed.FS
+
 const (
 	// HTTP rate limiting
 	httpRequestsPerSecond = 10
@@ -56,6 +59,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 
 	mux.HandleFunc("/", s.routeHandler)
 	mux.HandleFunc("/style.css", s.handleStyleCSS)
+	mux.HandleFunc("/favicon.svg", s.handleFaviconSVG)
 	mux.HandleFunc("/health", s.handleHealth)
 	mux.HandleFunc("/metrics", s.handleMetrics)
 

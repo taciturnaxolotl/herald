@@ -4,7 +4,23 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>HERALD - {{.ShortFingerprint}}</title>
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎏</text></svg>">
+    <meta name="description" content="Herald dashboard for user {{.ShortFingerprint}}. View feed configs and delivery status.">
+    
+    <!-- Open Graph -->
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="HERALD - {{.ShortFingerprint}}">
+    <meta property="og:description" content="Herald dashboard for user {{.ShortFingerprint}}. View feed configs and delivery status.">
+    <meta property="og:url" content="{{.Origin}}/{{.Fingerprint}}">
+    <meta property="og:image" content="https://l4.dunkirk.sh/i/EIR_tb00BFEB.webp">
+    <meta property="og:site_name" content="HERALD">
+    
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="HERALD - {{.ShortFingerprint}}">
+    <meta name="twitter:description" content="Herald dashboard for user {{.ShortFingerprint}}. View feed configs and delivery status.">
+    <meta name="twitter:image" content="https://l4.dunkirk.sh/i/EIR_tb00BFEB.webp">
+    
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="/style.css">
 </head>
 <body>

@@ -60,6 +60,16 @@ func (s *Server) handleStyleCSS(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(css)
 }
 
+func (s *Server) handleFaviconSVG(w http.ResponseWriter, r *http.Request) {
+	svg, err := publicFS.ReadFile("public/favicon.svg")
+	if err != nil {
+		http.Error(w, "Not Found", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "image/svg+xml")
+	_, _ = w.Write(svg)
+}
+
 type userPageData struct {
 	Fingerprint      string
 	ShortFingerprint string
