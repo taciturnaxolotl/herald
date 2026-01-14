@@ -82,6 +82,17 @@ func (db *DB) CreateConfigTx(ctx context.Context, tx *sql.Tx, userID int64, file
 	}, nil
 }
 
+func (db *DB) UpdateConfigTx(ctx context.Context, tx *sql.Tx, configID int64, email, cronExpr string, digest, inline bool, rawText string, nextRun time.Time) error {
+	_, err := tx.ExecContext(ctx,
+		`UPDATE configs SET email = ?, cron_expr = ?, digest = ?, inline_content = ?, raw_text = ?, next_run = ? WHERE id = ?`,
+		email, cronExpr, digest, inline, rawText, nextRun, configID,
+	)
+	if err != nil {
+		return fmt.Errorf("update config: %w", err)
+	}
+	return nil
+}
+
 func (db *DB) DeleteConfigTx(ctx context.Context, tx *sql.Tx, userID int64, filename string) error {
 	result, err := tx.ExecContext(ctx,
 		`DELETE FROM configs WHERE user_id = ? AND filename = ?`,
@@ -104,6 +115,19 @@ func (db *DB) DeleteConfigTx(ctx context.Context, tx *sql.Tx, userID int64, file
 func (db *DB) GetConfig(ctx context.Context, userID int64, filename string) (*Config, error) {
 	var cfg Config
 	err := db.stmts.getConfig.QueryRowContext(ctx, userID, filename).Scan(&cfg.ID, &cfg.UserID, &cfg.Filename, &cfg.Email, &cfg.CronExpr, &cfg.Digest, &cfg.InlineContent, &cfg.RawText, &cfg.LastRun, &cfg.NextRun, &cfg.CreatedAt, &cfg.LastActiveAt)
+	if err != nil {
+		return nil, err
+	}
+	return &cfg, nil
+}
+
+func (db *DB) GetConfigTx(ctx context.Context, tx *sql.Tx, userID int64, filename string) (*Config, error) {
+	var cfg Config
+	err := tx.QueryRowContext(ctx,
+		`SELECT id, user_id, filename, email, cron_expr, digest, inline_content, raw_text, last_run, next_run, created_at, last_active_at
+		 FROM configs WHERE user_id = ? AND filename = ?`,
+		userID, filename,
+	).Scan(&cfg.ID, &cfg.UserID, &cfg.Filename, &cfg.Email, &cfg.CronExpr, &cfg.Digest, &cfg.InlineContent, &cfg.RawText, &cfg.LastRun, &cfg.NextRun, &cfg.CreatedAt, &cfg.LastActiveAt)
 	if err != nil {
 		return nil, err
 	}
@@ -143,6 +167,17 @@ func (db *DB) ListConfigs(ctx context.Context, userID int64) ([]*Config, error) 
 		configs = append(configs, &cfg)
 	}
 	return configs, rows.Err()
+}
+
+func (db *DB) UpdateConfig(ctx context.Context, configID int64, email, cronExpr string, digest, inline bool, rawText string, nextRun time.Time) error {
+	_, err := db.ExecContext(ctx,
+		`UPDATE configs SET email = ?, cron_expr = ?, digest = ?, inline_content = ?, raw_text = ?, next_run = ? WHERE id = ?`,
+		email, cronExpr, digest, inline, rawText, nextRun, configID,
+	)
+	if err != nil {
+		return fmt.Errorf("update config: %w", err)
+	}
+	return nil
 }
 
 func (db *DB) DeleteConfig(ctx context.Context, userID int64, filename string) error {

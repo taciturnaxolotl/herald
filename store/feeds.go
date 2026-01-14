@@ -71,8 +71,57 @@ func (db *DB) CreateFeedTx(ctx context.Context, tx *sql.Tx, configID int64, url,
 	}, nil
 }
 
+func (db *DB) UpdateFeedTx(ctx context.Context, tx *sql.Tx, feedID int64, name string) error {
+	var nameVal sql.NullString
+	if name != "" {
+		nameVal = sql.NullString{String: name, Valid: true}
+	}
+
+	_, err := tx.ExecContext(ctx,
+		`UPDATE feeds SET name = ? WHERE id = ?`,
+		nameVal, feedID,
+	)
+	if err != nil {
+		return fmt.Errorf("update feed: %w", err)
+	}
+	return nil
+}
+
+func (db *DB) DeleteFeedTx(ctx context.Context, tx *sql.Tx, feedID int64) error {
+	_, err := tx.ExecContext(ctx,
+		`DELETE FROM feeds WHERE id = ?`,
+		feedID,
+	)
+	if err != nil {
+		return fmt.Errorf("delete feed: %w", err)
+	}
+	return nil
+}
+
 func (db *DB) GetFeedsByConfig(ctx context.Context, configID int64) ([]*Feed, error) {
 	rows, err := db.QueryContext(ctx,
+		`SELECT id, config_id, url, name, last_fetched, etag, last_modified
+		 FROM feeds WHERE config_id = ? ORDER BY id`,
+		configID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query feeds: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var feeds []*Feed
+	for rows.Next() {
+		var f Feed
+		if err := rows.Scan(&f.ID, &f.ConfigID, &f.URL, &f.Name, &f.LastFetched, &f.ETag, &f.LastModified); err != nil {
+			return nil, fmt.Errorf("scan feed: %w", err)
+		}
+		feeds = append(feeds, &f)
+	}
+	return feeds, rows.Err()
+}
+
+func (db *DB) GetFeedsByConfigTx(ctx context.Context, tx *sql.Tx, configID int64) ([]*Feed, error) {
+	rows, err := tx.QueryContext(ctx,
 		`SELECT id, config_id, url, name, last_fetched, etag, last_modified
 		 FROM feeds WHERE config_id = ? ORDER BY id`,
 		configID,
@@ -131,6 +180,33 @@ func (db *DB) GetFeedsByConfigs(ctx context.Context, configIDs []int64) (map[int
 	}
 
 	return feedMap, rows.Err()
+}
+
+func (db *DB) UpdateFeed(ctx context.Context, feedID int64, name string) error {
+	var nameVal sql.NullString
+	if name != "" {
+		nameVal = sql.NullString{String: name, Valid: true}
+	}
+
+	_, err := db.ExecContext(ctx,
+		`UPDATE feeds SET name = ? WHERE id = ?`,
+		nameVal, feedID,
+	)
+	if err != nil {
+		return fmt.Errorf("update feed: %w", err)
+	}
+	return nil
+}
+
+func (db *DB) DeleteFeed(ctx context.Context, feedID int64) error {
+	_, err := db.ExecContext(ctx,
+		`DELETE FROM feeds WHERE id = ?`,
+		feedID,
+	)
+	if err != nil {
+		return fmt.Errorf("delete feed: %w", err)
+	}
+	return nil
 }
 
 func (db *DB) UpdateFeedFetched(ctx context.Context, feedID int64, etag, lastModified string) error {
