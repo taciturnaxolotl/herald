@@ -176,19 +176,79 @@ func (w *configWriter) Close() error {
 	}
 
 	ctx := w.handler.session.Context()
-	if err := w.handler.store.DeleteConfig(ctx, w.handler.user.ID, w.filename); err != nil {
-		w.handler.logger.Debug("no existing config to delete", "filename", w.filename)
-	}
 
-	cfg, err := w.handler.store.CreateConfig(ctx, w.handler.user.ID, w.filename, parsed.Email, parsed.CronExpr, parsed.Digest, parsed.Inline, content, nextRun)
-	if err != nil {
-		return fmt.Errorf("failed to save config: %w", err)
-	}
+	// Try to get existing config
+	existingCfg, err := w.handler.store.GetConfig(ctx, w.handler.user.ID, w.filename)
+	var cfg *store.Config
 
-	for _, feed := range parsed.Feeds {
-		if _, err := w.handler.store.CreateFeed(ctx, cfg.ID, feed.URL, feed.Name); err != nil {
-			return fmt.Errorf("failed to save feed: %w", err)
+	if err == nil {
+		// Config exists - update it
+		if err := w.handler.store.UpdateConfig(ctx, existingCfg.ID, parsed.Email, parsed.CronExpr, parsed.Digest, parsed.Inline, content, nextRun); err != nil {
+			return fmt.Errorf("failed to update config: %w", err)
 		}
+		cfg = existingCfg
+		cfg.Email = parsed.Email
+		cfg.CronExpr = parsed.CronExpr
+		cfg.Digest = parsed.Digest
+		cfg.InlineContent = parsed.Inline
+		cfg.RawText = content
+
+		// Sync feeds: match by URL, update/delete/add as needed
+		existingFeeds, err := w.handler.store.GetFeedsByConfig(ctx, cfg.ID)
+		if err != nil {
+			return fmt.Errorf("failed to get existing feeds: %w", err)
+		}
+
+		// Build maps for comparison
+		existingByURL := make(map[string]*store.Feed)
+		for _, f := range existingFeeds {
+			existingByURL[f.URL] = f
+		}
+
+		newByURL := make(map[string]struct{ URL, Name string })
+		for _, f := range parsed.Feeds {
+			newByURL[f.URL] = struct{ URL, Name string }{URL: f.URL, Name: f.Name}
+		}
+
+		// Update existing feeds that are still present
+		for _, newFeed := range parsed.Feeds {
+			if existingFeed, exists := existingByURL[newFeed.URL]; exists {
+				// Feed still exists - update name if changed
+				if err := w.handler.store.UpdateFeed(ctx, existingFeed.ID, newFeed.Name); err != nil {
+					return fmt.Errorf("failed to update feed: %w", err)
+				}
+			} else {
+				// New feed - create it
+				if _, err := w.handler.store.CreateFeed(ctx, cfg.ID, newFeed.URL, newFeed.Name); err != nil {
+					return fmt.Errorf("failed to create feed: %w", err)
+				}
+			}
+		}
+
+		// Delete feeds that are no longer present
+		for _, existingFeed := range existingFeeds {
+			if _, stillExists := newByURL[existingFeed.URL]; !stillExists {
+				if err := w.handler.store.DeleteFeed(ctx, existingFeed.ID); err != nil {
+					return fmt.Errorf("failed to delete feed: %w", err)
+				}
+			}
+		}
+
+		w.handler.logger.Debug("updated existing config via SFTP", "filename", w.filename)
+	} else {
+		// Config doesn't exist - create new one
+		cfg, err = w.handler.store.CreateConfig(ctx, w.handler.user.ID, w.filename, parsed.Email, parsed.CronExpr, parsed.Digest, parsed.Inline, content, nextRun)
+		if err != nil {
+			return fmt.Errorf("failed to create config: %w", err)
+		}
+
+		for _, feed := range parsed.Feeds {
+			if _, err := w.handler.store.CreateFeed(ctx, cfg.ID, feed.URL, feed.Name); err != nil {
+				return fmt.Errorf("failed to create feed: %w", err)
+			}
+		}
+
+		w.handler.logger.Debug("created new config via SFTP", "filename", w.filename)
 	}
 
 	w.handler.logger.Info("config uploaded via SFTP", "user_id", w.handler.user.ID, "filename", w.filename, "feeds", len(parsed.Feeds))
