@@ -86,7 +86,7 @@ func RenderDigest(data *DigestData, inline bool, daysUntilExpiry int, showUrgent
 				Title:            item.Title,
 				Link:             item.Link,
 				Content:          item.Content,
-				SanitizedContent: htmltemplate.HTML(sanitizeHTML(item.Content)),
+				SanitizedContent: htmltemplate.HTML(sanitizeHTML(item.Content)), // #nosec G203 -- Content is sanitized by bluemonday before conversion
 				Published:        item.Published,
 			}
 		}
