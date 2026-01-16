@@ -67,7 +67,7 @@
       {{range .Items}}
       <div>
         <h1><a href="{{.Link}}">{{.Title}}</a></h1>
-        <div>{{.Content}}</div>
+        <div>{{.SanitizedContent}}</div>
       </div>
       <hr />
       {{end}}
