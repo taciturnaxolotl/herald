@@ -32,7 +32,8 @@
             version = "0.1.1";
             subPackages = [ "." ];
             src = self;
-            vendorHash = "sha256-IE7JMJ4DehwYxrkh5YCgw7yWdybxtCCxWQO7M/u6bno=";
+            vendorHash = "sha256-SjxTy/ecSUYaJJ8dpfQFLF7WgVEpnKcu5qWcqyw611Q=";
+            proxyVendor = true;
             ldflags = [
               "-X main.commitHash=${self.rev or self.dirtyRev or "dev"}"
               "-X main.version=0.1.1"
