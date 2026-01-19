@@ -2,6 +2,8 @@ package ssh
 
 import (
 	"bytes"
+	"context"
+	"database/sql"
 	"fmt"
 	"io"
 	"io/fs"
@@ -197,9 +199,14 @@ func (h *scpHandler) Write(s ssh.Session, entry *scp.FileEntry) (int64, error) {
 					return 0, fmt.Errorf("failed to update feed: %w", err)
 				}
 			} else {
-				// New feed - create it
-				if _, err := h.store.CreateFeedTx(ctx, tx, cfg.ID, newFeed.URL, newFeed.Name); err != nil {
+				// New feed - create it and mark existing items as seen
+				newFeedRecord, err := h.store.CreateFeedTx(ctx, tx, cfg.ID, newFeed.URL, newFeed.Name)
+				if err != nil {
 					return 0, fmt.Errorf("failed to create feed: %w", err)
+				}
+				// Pre-seed seen items so we don't send old posts
+				if err := h.preseedSeenItems(ctx, tx, newFeedRecord); err != nil {
+					h.logger.Warn("failed to preseed seen items", "feed_url", newFeed.URL, "err", err)
 				}
 			}
 		}
@@ -239,7 +246,7 @@ func (h *scpHandler) Write(s ssh.Session, entry *scp.FileEntry) (int64, error) {
 }
 
 func calculateNextRun(cronExpr string) (time.Time, error) {
-	return gronx.NextTick(cronExpr, true)
+	return gronx.NextTickAfter(cronExpr, time.Now().UTC(), true)
 }
 
 type configFileInfo struct {
@@ -261,3 +268,21 @@ func (e *configDirEntry) Name() string               { return e.info.Name() }
 func (e *configDirEntry) IsDir() bool                { return false }
 func (e *configDirEntry) Type() fs.FileMode          { return e.info.Mode() }
 func (e *configDirEntry) Info() (fs.FileInfo, error) { return e.info, nil }
+
+// preseedSeenItems fetches the feed and marks all current items as seen,
+// so that adding a new feed doesn't trigger emails for old posts.
+func (h *scpHandler) preseedSeenItems(ctx context.Context, tx *sql.Tx, feed *store.Feed) error {
+	result := scheduler.FetchFeed(ctx, feed)
+	if result.Error != nil {
+		return result.Error
+	}
+
+	for _, item := range result.Items {
+		if err := h.store.MarkItemSeenTx(ctx, tx, feed.ID, item.GUID, item.Title, item.Link); err != nil {
+			return err
+		}
+	}
+
+	h.logger.Debug("preseeded seen items for new feed", "feed_url", feed.URL, "count", len(result.Items))
+	return nil
+}

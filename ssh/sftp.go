@@ -1,6 +1,7 @@
 package ssh
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"io/fs"
@@ -218,9 +219,14 @@ func (w *configWriter) Close() error {
 					return fmt.Errorf("failed to update feed: %w", err)
 				}
 			} else {
-				// New feed - create it
-				if _, err := w.handler.store.CreateFeed(ctx, cfg.ID, newFeed.URL, newFeed.Name); err != nil {
+				// New feed - create it and mark existing items as seen
+				newFeedRecord, err := w.handler.store.CreateFeed(ctx, cfg.ID, newFeed.URL, newFeed.Name)
+				if err != nil {
 					return fmt.Errorf("failed to create feed: %w", err)
+				}
+				// Pre-seed seen items so we don't send old posts
+				if err := w.preseedSeenItems(ctx, newFeedRecord); err != nil {
+					w.handler.logger.Warn("failed to preseed seen items", "feed_url", newFeed.URL, "err", err)
 				}
 			}
 		}
@@ -252,6 +258,24 @@ func (w *configWriter) Close() error {
 	}
 
 	w.handler.logger.Info("config uploaded via SFTP", "user_id", w.handler.user.ID, "filename", w.filename, "feeds", len(parsed.Feeds))
+	return nil
+}
+
+// preseedSeenItems fetches the feed and marks all current items as seen,
+// so that adding a new feed doesn't trigger emails for old posts.
+func (w *configWriter) preseedSeenItems(ctx context.Context, feed *store.Feed) error {
+	result := scheduler.FetchFeed(ctx, feed)
+	if result.Error != nil {
+		return result.Error
+	}
+
+	for _, item := range result.Items {
+		if err := w.handler.store.MarkItemSeen(ctx, feed.ID, item.GUID, item.Title, item.Link); err != nil {
+			return err
+		}
+	}
+
+	w.handler.logger.Debug("preseeded seen items for new feed", "feed_url", feed.URL, "count", len(result.Items))
 	return nil
 }
 

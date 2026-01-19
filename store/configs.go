@@ -254,7 +254,7 @@ func (db *DB) ActivateConfig(ctx context.Context, userID int64, filename string)
 		return err
 	}
 
-	nextRun, err := gronx.NextTick(cfg.CronExpr, true)
+	nextRun, err := gronx.NextTickAfter(cfg.CronExpr, time.Now().UTC(), true)
 	if err != nil {
 		return fmt.Errorf("calculate next run: %w", err)
 	}

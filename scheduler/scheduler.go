@@ -258,7 +258,7 @@ func (s *Scheduler) RunNow(ctx context.Context, configID int64, progress *atomic
 
 	s.logger.Debug("RunNow: calculating next run")
 	now := time.Now().UTC()
-	nextRun, err := gronx.NextTick(cfg.CronExpr, true)
+	nextRun, err := gronx.NextTickAfter(cfg.CronExpr, now, true)
 	if err != nil {
 		return stats, fmt.Errorf("calculate next run: %w", err)
 	}
@@ -487,7 +487,7 @@ func (s *Scheduler) processConfig(ctx context.Context, cfg *store.Config) error 
 	}
 
 	now := time.Now().UTC()
-	nextRun, err := gronx.NextTick(cfg.CronExpr, true)
+	nextRun, err := gronx.NextTickAfter(cfg.CronExpr, now, true)
 	if err != nil {
 		return fmt.Errorf("calculate next run: %w", err)
 	}
