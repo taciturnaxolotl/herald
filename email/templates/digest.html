@@ -65,11 +65,13 @@
     {{if $.Inline}}
     <div>
       {{range .Items}}
+      {{if .SanitizedContent}}
       <div>
         <h1><a href="{{.Link}}">{{.Title}}</a></h1>
         <div>{{.SanitizedContent}}</div>
       </div>
       <hr />
+      {{end}}
       {{end}}
     </div>
     {{end}}

@@ -15,8 +15,8 @@ Summary
 {{.Title}}
 {{.Link}}
 {{if and $.Inline .Content}}
-{{.Content}}
 
+{{.Content}}
 {{end}}
 {{end}}
 {{end}}
