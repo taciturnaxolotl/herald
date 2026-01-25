@@ -145,9 +145,9 @@ func TestRenderDigest_CodeBlockFormatting(t *testing.T) {
 				FeedURL:  "https://example.com/feed",
 				Items: []FeedItem{
 					{
-						Title:     "Test Article",
-						Link:      "https://example.com/article",
-						Content:   `<p>Code example:</p><pre><span class="c1"># comment</span>
+						Title: "Test Article",
+						Link:  "https://example.com/article",
+						Content: `<p>Code example:</p><pre><span class="c1"># comment</span>
 echo hello</pre><p>Done.</p>`,
 						Published: time.Now(),
 					},
