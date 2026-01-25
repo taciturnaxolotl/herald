@@ -3,6 +3,7 @@ package email
 import (
 	"bytes"
 	"embed"
+	"fmt"
 	htmltemplate "html/template"
 	"regexp"
 	"strings"
@@ -54,31 +55,89 @@ type templateFeedGroup struct {
 // emailUnsafeTags are HTML5 semantic tags not supported by most email clients (Gmail, Outlook, etc.)
 var emailUnsafeTags = regexp.MustCompile(`</?(?:article|section|nav|header|footer|aside|main|figure|figcaption|details|summary|mark|time|dialog)(?:\s[^>]*)?>`)
 
+// spanTags matches span tags (used to strip syntax highlighting noise from code blocks)
+var spanTags = regexp.MustCompile(`</?span(?:\s[^>]*)?>`)
+
+// preTagOpen matches opening pre tags to add styling
+var preTagOpen = regexp.MustCompile(`<pre(?:\s[^>]*)?>`)
+
+// codeBlockStyle is inline CSS for code blocks in emails
+const codeBlockStyle = `<pre style="background-color:#f5f5f5;padding:12px;border-radius:4px;overflow-x:auto;font-family:monospace;font-size:13px;line-height:1.4">`
+
 // sanitizeHTML sanitizes HTML content, allowing safe tags while stripping styles and unsafe elements
 func sanitizeHTML(html string) string {
 	sanitized := policy.Sanitize(html)
 	// Strip HTML5 semantic tags that email clients don't support
-	return emailUnsafeTags.ReplaceAllString(sanitized, "")
+	sanitized = emailUnsafeTags.ReplaceAllString(sanitized, "")
+	// Strip span tags (removes syntax highlighting noise from code blocks)
+	sanitized = spanTags.ReplaceAllString(sanitized, "")
+	// Add styling to pre tags for better code block appearance
+	sanitized = preTagOpen.ReplaceAllString(sanitized, codeBlockStyle)
+	return sanitized
 }
 
 // htmlTagRegex matches HTML tags for stripping
 var htmlTagRegex = regexp.MustCompile(`<[^>]*>`)
 
-// stripHTML removes all HTML tags and decodes entities for plain text output
-func stripHTML(html string) string {
-	// First sanitize to ensure we're working with clean HTML
-	sanitized := policy.Sanitize(html)
-	// Strip all remaining HTML tags
-	text := htmlTagRegex.ReplaceAllString(sanitized, "")
-	// Decode common HTML entities
+// preBlockRegex matches pre blocks including content
+var preBlockRegex = regexp.MustCompile(`(?s)<pre[^>]*>(.*?)</pre>`)
+
+// whitespaceCollapse collapses multiple whitespace chars
+var whitespaceCollapse = regexp.MustCompile(`[ \t]+`)
+
+// multipleNewlines collapses 3+ newlines to 2
+var multipleNewlines = regexp.MustCompile(`\n{3,}`)
+
+// decodeEntities decodes common HTML entities
+func decodeEntities(text string) string {
 	text = strings.ReplaceAll(text, "&amp;", "&")
 	text = strings.ReplaceAll(text, "&lt;", "<")
 	text = strings.ReplaceAll(text, "&gt;", ">")
 	text = strings.ReplaceAll(text, "&quot;", "\"")
 	text = strings.ReplaceAll(text, "&#39;", "'")
 	text = strings.ReplaceAll(text, "&nbsp;", " ")
-	// Collapse multiple whitespace/newlines
-	text = regexp.MustCompile(`\s+`).ReplaceAllString(text, " ")
+	return text
+}
+
+// stripHTML removes all HTML tags and decodes entities for plain text output
+func stripHTML(html string) string {
+	// First sanitize to ensure we're working with clean HTML
+	sanitized := policy.Sanitize(html)
+
+	// Extract code blocks and replace with placeholders
+	var codeBlocks []string
+	sanitized = preBlockRegex.ReplaceAllStringFunc(sanitized, func(match string) string {
+		inner := preBlockRegex.FindStringSubmatch(match)
+		if len(inner) < 2 {
+			return match
+		}
+		code := inner[1]
+		// Strip any remaining tags (like spans for syntax highlighting)
+		code = htmlTagRegex.ReplaceAllString(code, "")
+		code = decodeEntities(code)
+		// Indent each line with 4 spaces
+		lines := strings.Split(strings.TrimSpace(code), "\n")
+		for i, line := range lines {
+			lines[i] = "    " + line
+		}
+		codeBlocks = append(codeBlocks, strings.Join(lines, "\n"))
+		return fmt.Sprintf("\n\n__CODEBLOCK_%d__\n\n", len(codeBlocks)-1)
+	})
+
+	// Strip all remaining HTML tags
+	text := htmlTagRegex.ReplaceAllString(sanitized, "")
+	// Decode entities
+	text = decodeEntities(text)
+	// Collapse horizontal whitespace (but preserve newlines for structure)
+	text = whitespaceCollapse.ReplaceAllString(text, " ")
+	// Collapse excessive newlines
+	text = multipleNewlines.ReplaceAllString(text, "\n\n")
+
+	// Restore code blocks
+	for i, block := range codeBlocks {
+		text = strings.ReplaceAll(text, fmt.Sprintf("__CODEBLOCK_%d__", i), block)
+	}
+
 	return strings.TrimSpace(text)
 }
 

@@ -134,3 +134,50 @@ func TestRenderDigest_TextOutputNoHTMLTags(t *testing.T) {
 		t.Error("Text content was not preserved after HTML stripping")
 	}
 }
+
+func TestRenderDigest_CodeBlockFormatting(t *testing.T) {
+	data := &DigestData{
+		ConfigName: "Test Config",
+		TotalItems: 1,
+		FeedGroups: []FeedGroup{
+			{
+				FeedName: "Test Feed",
+				FeedURL:  "https://example.com/feed",
+				Items: []FeedItem{
+					{
+						Title:     "Test Article",
+						Link:      "https://example.com/article",
+						Content:   `<p>Code example:</p><pre><span class="c1"># comment</span>
+echo hello</pre><p>Done.</p>`,
+						Published: time.Now(),
+					},
+				},
+			},
+		},
+	}
+
+	htmlOutput, textOutput, err := RenderDigest(data, true, 30, false, false)
+	if err != nil {
+		t.Fatalf("RenderDigest failed: %v", err)
+	}
+
+	// HTML: verify code block has styling
+	if !strings.Contains(htmlOutput, `<pre style="background-color:#f5f5f5`) {
+		t.Error("HTML code block missing styling")
+	}
+
+	// HTML: verify syntax highlighting spans are stripped
+	if strings.Contains(htmlOutput, `class="c1"`) {
+		t.Error("Syntax highlighting classes should be stripped")
+	}
+
+	// Text: verify code is indented
+	if !strings.Contains(textOutput, "    # comment") {
+		t.Error("Text code block should be indented with 4 spaces")
+	}
+
+	// Text: verify no HTML tags in code block
+	if strings.Contains(textOutput, "<span") || strings.Contains(textOutput, "<pre") {
+		t.Error("Text output should not contain HTML tags")
+	}
+}
