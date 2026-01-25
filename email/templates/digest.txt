@@ -14,9 +14,9 @@ Summary
 {{range .Items}}
 {{.Title}}
 {{.Link}}
-{{if and $.Inline .Content}}
+{{if and $.Inline .PlainContent}}
 
-{{.Content}}
+{{.PlainContent}}
 {{end}}
 {{end}}
 {{end}}

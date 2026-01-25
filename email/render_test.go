@@ -93,3 +93,44 @@ func TestRenderDigest_UnsafeHTMLStripped(t *testing.T) {
 		t.Error("Safe HTML content was incorrectly removed")
 	}
 }
+
+func TestRenderDigest_TextOutputNoHTMLTags(t *testing.T) {
+	// Create test data with HTML content
+	data := &DigestData{
+		ConfigName: "Test Config",
+		TotalItems: 1,
+		FeedGroups: []FeedGroup{
+			{
+				FeedName: "Test Feed",
+				FeedURL:  "https://example.com/feed",
+				Items: []FeedItem{
+					{
+						Title:     "Test Article",
+						Link:      "https://example.com/article",
+						Content:   "<article><p>This is a <strong>test</strong> article with <a href='https://example.com'>a link</a>.</p></article>",
+						Published: time.Now(),
+					},
+				},
+			},
+		},
+	}
+
+	// Render with inline mode enabled
+	_, textOutput, err := RenderDigest(data, true, 30, false, false)
+	if err != nil {
+		t.Fatalf("RenderDigest failed: %v", err)
+	}
+
+	// Verify text output does NOT contain HTML tags
+	htmlTags := []string{"<article>", "<p>", "<strong>", "<a href", "</article>", "</p>", "</strong>", "</a>"}
+	for _, tag := range htmlTags {
+		if strings.Contains(textOutput, tag) {
+			t.Errorf("Text output contains HTML tag %q - should be stripped", tag)
+		}
+	}
+
+	// Verify the actual text content is present
+	if !strings.Contains(textOutput, "This is a test article with a link") {
+		t.Error("Text content was not preserved after HTML stripping")
+	}
+}

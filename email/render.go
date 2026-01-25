@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"embed"
 	htmltemplate "html/template"
+	"regexp"
+	"strings"
 	texttemplate "text/template"
 	"time"
 
@@ -36,7 +38,8 @@ type FeedItem struct {
 type templateFeedItem struct {
 	Title            string
 	Link             string
-	Content          string            // Original content for text template
+	Content          string            // Original content (unused, kept for compatibility)
+	PlainContent     string            // HTML-stripped content for text template
 	SanitizedContent htmltemplate.HTML // Sanitized HTML for HTML template
 	Published        time.Time
 }
@@ -48,9 +51,35 @@ type templateFeedGroup struct {
 	Items    []templateFeedItem
 }
 
+// emailUnsafeTags are HTML5 semantic tags not supported by most email clients (Gmail, Outlook, etc.)
+var emailUnsafeTags = regexp.MustCompile(`</?(?:article|section|nav|header|footer|aside|main|figure|figcaption|details|summary|mark|time|dialog)(?:\s[^>]*)?>`)
+
 // sanitizeHTML sanitizes HTML content, allowing safe tags while stripping styles and unsafe elements
 func sanitizeHTML(html string) string {
-	return policy.Sanitize(html)
+	sanitized := policy.Sanitize(html)
+	// Strip HTML5 semantic tags that email clients don't support
+	return emailUnsafeTags.ReplaceAllString(sanitized, "")
+}
+
+// htmlTagRegex matches HTML tags for stripping
+var htmlTagRegex = regexp.MustCompile(`<[^>]*>`)
+
+// stripHTML removes all HTML tags and decodes entities for plain text output
+func stripHTML(html string) string {
+	// First sanitize to ensure we're working with clean HTML
+	sanitized := policy.Sanitize(html)
+	// Strip all remaining HTML tags
+	text := htmlTagRegex.ReplaceAllString(sanitized, "")
+	// Decode common HTML entities
+	text = strings.ReplaceAll(text, "&amp;", "&")
+	text = strings.ReplaceAll(text, "&lt;", "<")
+	text = strings.ReplaceAll(text, "&gt;", ">")
+	text = strings.ReplaceAll(text, "&quot;", "\"")
+	text = strings.ReplaceAll(text, "&#39;", "'")
+	text = strings.ReplaceAll(text, "&nbsp;", " ")
+	// Collapse multiple whitespace/newlines
+	text = regexp.MustCompile(`\s+`).ReplaceAllString(text, " ")
+	return strings.TrimSpace(text)
 }
 
 var (
@@ -86,6 +115,7 @@ func RenderDigest(data *DigestData, inline bool, daysUntilExpiry int, showUrgent
 				Title:            item.Title,
 				Link:             item.Link,
 				Content:          item.Content,
+				PlainContent:     stripHTML(item.Content),
 				SanitizedContent: htmltemplate.HTML(sanitizeHTML(item.Content)), // #nosec G203 -- Content is sanitized by bluemonday before conversion
 				Published:        item.Published,
 			}
@@ -116,15 +146,19 @@ func RenderDigest(data *DigestData, inline bool, daysUntilExpiry int, showUrgent
 		ShowWarningBanner: showWarningBanner,
 	}
 
-	// Prepare template data for text template (with original content)
+	// Prepare template data for text template (with plain text content)
 	textTmplData := struct {
-		*DigestData
+		ConfigName        string
+		TotalItems        int
+		FeedGroups        []templateFeedGroup
 		Inline            bool
 		DaysUntilExpiry   int
 		ShowUrgentBanner  bool
 		ShowWarningBanner bool
 	}{
-		DigestData:        data,
+		ConfigName:        data.ConfigName,
+		TotalItems:        data.TotalItems,
+		FeedGroups:        sanitizedGroups,
 		Inline:            inline,
 		DaysUntilExpiry:   daysUntilExpiry,
 		ShowUrgentBanner:  showUrgentBanner,
