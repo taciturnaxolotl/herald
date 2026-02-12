@@ -2,9 +2,11 @@ package email
 
 import (
 	"bytes"
+	"crypto/rand"
 	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/pem"
 	"fmt"
 	"mime"
@@ -196,6 +198,8 @@ func (m *Mailer) Send(to, subject, htmlBody, textBody, unsubToken, dashboardURL,
 	headers["Subject"] = mime.QEncoding.Encode("utf-8", subject)
 	headers["MIME-Version"] = "1.0"
 	headers["Content-Type"] = fmt.Sprintf("multipart/alternative; boundary=%q", boundary)
+	headers["Date"] = time.Now().Format(time.RFC1123Z)
+	headers["Message-ID"] = fmt.Sprintf("<%d.%s@%s>", time.Now().Unix(), generateMessageIDToken(), m.cfg.Host)
 
 	// RFC 2369 list headers
 	headers["List-Id"] = fmt.Sprintf("<herald.%s>", m.cfg.Host)
@@ -209,9 +213,8 @@ func (m *Mailer) Send(to, subject, htmlBody, textBody, unsubToken, dashboardURL,
 		headers["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
 	}
 
-	// Bulk mail and auto-generated headers for better deliverability
+	// Bulk mail headers for better deliverability
 	headers["Precedence"] = "bulk"
-	headers["Auto-Submitted"] = "auto-generated"
 	headers["X-Mailer"] = "Herald"
 
 	var msg strings.Builder
@@ -257,6 +260,12 @@ func (m *Mailer) Send(to, subject, htmlBody, textBody, unsubToken, dashboardURL,
 	}
 
 	return m.sendWithSTARTTLS(addr, auth, to, messageBytes)
+}
+
+func generateMessageIDToken() string {
+	b := make([]byte, 8)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
 }
 
 func encodeQuotedPrintable(s string) string {
