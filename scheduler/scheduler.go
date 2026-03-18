@@ -355,7 +355,11 @@ func (s *Scheduler) sendDigestAndMarkSeen(ctx context.Context, cfg *store.Config
 	}
 
 	// Calculate expiry info
-	expiryDate := cfg.CreatedAt.AddDate(0, 0, 90)
+	expiryBase := cfg.CreatedAt
+	if cfg.LastActiveAt.Valid && cfg.LastActiveAt.Time.After(cfg.CreatedAt) {
+		expiryBase = cfg.LastActiveAt.Time
+	}
+	expiryDate := expiryBase.AddDate(0, 0, 90)
 	daysUntilExpiry := int(time.Until(expiryDate).Hours() / 24)
 	showUrgentBanner := daysUntilExpiry <= 7 && daysUntilExpiry >= 0
 	showWarningBanner := daysUntilExpiry > 7 && daysUntilExpiry <= 30
