@@ -155,7 +155,7 @@ func (m *Mailer) ValidateConfig() error {
 func (m *Mailer) Send(to, subject, htmlBody, textBody, unsubToken, dashboardURL, keepAliveURL string) error {
 	addr := net.JoinHostPort(m.cfg.Host, fmt.Sprintf("%d", m.cfg.Port))
 
-	boundary := "==herald-boundary-a1b2c3d4e5f6=="
+	boundary := "==herald-" + generateMessageIDToken() + "=="
 
 	// Add footer with keep-alive, unsubscribe, and dashboard links
 	var htmlFooter strings.Builder
@@ -199,7 +199,7 @@ func (m *Mailer) Send(to, subject, htmlBody, textBody, unsubToken, dashboardURL,
 	headers["MIME-Version"] = "1.0"
 	headers["Content-Type"] = fmt.Sprintf("multipart/alternative; boundary=%q", boundary)
 	headers["Date"] = time.Now().Format(time.RFC1123Z)
-	headers["Message-ID"] = fmt.Sprintf("<%d.%s@%s>", time.Now().Unix(), generateMessageIDToken(), m.cfg.Host)
+	headers["Message-ID"] = fmt.Sprintf("<%d.%s@%s>", time.Now().Unix(), generateMessageIDToken(), senderDomain(m.cfg.From))
 
 	// RFC 2369 list headers
 	headers["List-Id"] = fmt.Sprintf("<herald.%s>", m.cfg.Host)
@@ -260,6 +260,15 @@ func (m *Mailer) Send(to, subject, htmlBody, textBody, unsubToken, dashboardURL,
 	}
 
 	return m.sendWithSTARTTLS(addr, auth, to, messageBytes)
+}
+
+// senderDomain extracts the domain part from an email address.
+// Falls back to the full address if parsing fails.
+func senderDomain(from string) string {
+	if idx := strings.LastIndex(from, "@"); idx >= 0 {
+		return from[idx+1:]
+	}
+	return from
 }
 
 func generateMessageIDToken() string {
@@ -395,8 +404,15 @@ func (m *Mailer) signDKIM(message []byte) ([]byte, error) {
 			"From",
 			"To",
 			"Subject",
+			"Date",
+			"Message-ID",
+			"MIME-Version",
+			"Content-Type",
+			"List-Id",
 			"List-Unsubscribe",
 			"List-Unsubscribe-Post",
+			"List-Post",
+			"Precedence",
 		},
 		Expiration: time.Now().Add(72 * time.Hour),
 	}
