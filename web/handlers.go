@@ -506,6 +506,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request, fingerprin
 	}
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	//nolint:gosec // text/plain content-type prevents script execution
 	_, _ = w.Write([]byte(cfg.RawText))
 }
 

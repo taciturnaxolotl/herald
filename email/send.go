@@ -166,16 +166,16 @@ func (m *Mailer) Send(to, subject, htmlBody, textBody, unsubToken, dashboardURL,
 		textFooter.WriteString("\n\n---\n")
 
 		if keepAliveURL != "" {
-			htmlFooter.WriteString(fmt.Sprintf(`<a href="%s">keep this digest active</a>`, keepAliveURL))
-			textFooter.WriteString(fmt.Sprintf("keep this digest active: %s\n", keepAliveURL))
+			fmt.Fprintf(&htmlFooter, `<a href="%s">keep this digest active</a>`, keepAliveURL)
+			fmt.Fprintf(&textFooter, "keep this digest active: %s\n", keepAliveURL)
 		}
 
 		if dashboardURL != "" {
 			if keepAliveURL != "" {
 				htmlFooter.WriteString(" • ")
 			}
-			htmlFooter.WriteString(fmt.Sprintf(`<a href="%s">profile</a>`, dashboardURL))
-			textFooter.WriteString(fmt.Sprintf("profile: %s\n", dashboardURL))
+			fmt.Fprintf(&htmlFooter, `<a href="%s">profile</a>`, dashboardURL)
+			fmt.Fprintf(&textFooter, "profile: %s\n", dashboardURL)
 		}
 
 		if unsubToken != "" {
@@ -183,8 +183,8 @@ func (m *Mailer) Send(to, subject, htmlBody, textBody, unsubToken, dashboardURL,
 			if dashboardURL != "" || keepAliveURL != "" {
 				htmlFooter.WriteString(" • ")
 			}
-			htmlFooter.WriteString(fmt.Sprintf(`<a href="%s">unsubscribe</a>`, unsubURL))
-			textFooter.WriteString(fmt.Sprintf("unsubscribe: %s\n", unsubURL))
+			fmt.Fprintf(&htmlFooter, `<a href="%s">unsubscribe</a>`, unsubURL)
+			fmt.Fprintf(&textFooter, "unsubscribe: %s\n", unsubURL)
 		}
 
 		htmlFooter.WriteString("</p>")
@@ -219,25 +219,25 @@ func (m *Mailer) Send(to, subject, htmlBody, textBody, unsubToken, dashboardURL,
 
 	var msg strings.Builder
 	for k, v := range headers {
-		msg.WriteString(fmt.Sprintf("%s: %s\r\n", k, v))
+		fmt.Fprintf(&msg, "%s: %s\r\n", k, v)
 	}
 	msg.WriteString("\r\n")
 
-	msg.WriteString(fmt.Sprintf("--%s\r\n", boundary))
+	fmt.Fprintf(&msg, "--%s\r\n", boundary)
 	msg.WriteString("Content-Type: text/plain; charset=utf-8\r\n")
 	msg.WriteString("Content-Transfer-Encoding: quoted-printable\r\n\r\n")
 	textQP := encodeQuotedPrintable(textBody)
 	msg.WriteString(textQP)
 	msg.WriteString("\r\n")
 
-	msg.WriteString(fmt.Sprintf("--%s\r\n", boundary))
+	fmt.Fprintf(&msg, "--%s\r\n", boundary)
 	msg.WriteString("Content-Type: text/html; charset=utf-8\r\n")
 	msg.WriteString("Content-Transfer-Encoding: quoted-printable\r\n\r\n")
 	htmlQP := encodeQuotedPrintable(htmlBody)
 	msg.WriteString(htmlQP)
 	msg.WriteString("\r\n")
 
-	msg.WriteString(fmt.Sprintf("--%s--\r\n", boundary))
+	fmt.Fprintf(&msg, "--%s--\r\n", boundary)
 
 	messageBytes := []byte(msg.String())
 

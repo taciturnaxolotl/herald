@@ -71,6 +71,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 
 	go func() {
 		<-ctx.Done()
+		//nolint:gosec // Background context needed for graceful shutdown; request ctx is already cancelled
 		_ = srv.Shutdown(context.Background())
 	}()
 

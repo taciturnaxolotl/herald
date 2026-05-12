@@ -147,7 +147,8 @@ write to a temp file, and open it in the browser.`,
 			if err := runPreview(cmd.Context(), args[0], outputFile, inline); err != nil {
 				return err
 			}
-			return exec.Command("open", outputFile).Run()
+			//nolint:gosec // outputFile is from os.CreateTemp, not user-controlled
+		return exec.Command("open", outputFile).Run()
 		},
 	}
 
@@ -203,7 +204,7 @@ func runPreview(ctx context.Context, feedURL, outputFile string, inline bool) er
 		return fmt.Errorf("gmail wrap: %w", err)
 	}
 
-	if err := os.WriteFile(outputFile, []byte(gmailOutput), 0644); err != nil {
+	if err := os.WriteFile(outputFile, []byte(gmailOutput), 0600); err != nil {
 		return fmt.Errorf("write output: %w", err)
 	}
 	logger.Info("preview written", "file", outputFile, "items", len(items))
