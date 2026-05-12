@@ -69,9 +69,8 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
-	go func() {
+	go func() { //nolint:gosec // Background context needed for graceful shutdown; request ctx is already cancelled
 		<-ctx.Done()
-		//nolint:gosec // Background context needed for graceful shutdown; request ctx is already cancelled
 		_ = srv.Shutdown(context.Background())
 	}()
 

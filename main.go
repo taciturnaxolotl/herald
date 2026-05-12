@@ -147,8 +147,7 @@ write to a temp file, and open it in the browser.`,
 			if err := runPreview(cmd.Context(), args[0], outputFile, inline); err != nil {
 				return err
 			}
-			//nolint:gosec // outputFile is from os.CreateTemp, not user-controlled
-		return exec.Command("open", outputFile).Run()
+			return exec.Command("open", outputFile).Run() //nolint:gosec // outputFile is from os.CreateTemp, not user-controlled
 		},
 	}
 
