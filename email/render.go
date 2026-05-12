@@ -65,6 +65,9 @@ var tinyInlineImages = regexp.MustCompile(`<img[^>]*\s(?:width|height)="(?:\d|[1
 // spanTags matches span tags (used to strip syntax highlighting noise from code blocks)
 var spanTags = regexp.MustCompile(`</?span(?:\s[^>]*)?>`)
 
+// preBlockFull matches entire <pre>...</pre> blocks for whitespace normalization
+var preBlockFull = regexp.MustCompile(`(?s)(<pre[^>]*>)(.*?)(</pre>)`)
+
 // preTagOpen matches opening pre tags to add styling
 var preTagOpen = regexp.MustCompile(`<pre(?:\s[^>]*)?>`)
 
@@ -82,9 +85,58 @@ func sanitizeHTML(html string) string {
 	sanitized = tinyInlineImages.ReplaceAllString(sanitized, "")
 	// Strip span tags (removes syntax highlighting noise from code blocks)
 	sanitized = spanTags.ReplaceAllString(sanitized, "")
+	// Dedent pre blocks: RSS XML indentation leaks into <pre> content after
+	// span stripping, causing misaligned ASCII art and code
+	sanitized = preBlockFull.ReplaceAllStringFunc(sanitized, dedentPreBlock)
 	// Add styling to pre tags for better code block appearance
 	sanitized = preTagOpen.ReplaceAllString(sanitized, codeBlockStyle)
 	return sanitized
+}
+
+// dedentPreBlock removes common leading whitespace from lines inside a <pre> block.
+// RSS feeds often indent <pre> content with XML indentation that becomes visible
+// after span tags are stripped, breaking ASCII art alignment.
+func dedentPreBlock(block string) string {
+	m := preBlockFull.FindStringSubmatch(block)
+	if len(m) < 4 {
+		return block
+	}
+	openTag, inner, closeTag := m[1], m[2], m[3]
+
+	lines := strings.Split(inner, "\n")
+	if len(lines) <= 1 {
+		return block
+	}
+
+	// Find the minimum leading whitespace across non-empty lines (skip first
+	// line since it's right after the opening tag and usually has no indent)
+	minIndent := -1
+	for i, line := range lines {
+		if i == 0 || strings.TrimSpace(line) == "" {
+			continue
+		}
+		trimmed := strings.TrimLeft(line, " \t")
+		indent := len(line) - len(trimmed)
+		if minIndent < 0 || indent < minIndent {
+			minIndent = indent
+		}
+	}
+
+	if minIndent <= 0 {
+		return block
+	}
+
+	// Strip the common indent from each line
+	for i, line := range lines {
+		if i == 0 || len(line) == 0 {
+			continue
+		}
+		if len(line) >= minIndent {
+			lines[i] = line[minIndent:]
+		}
+	}
+
+	return openTag + strings.Join(lines, "\n") + closeTag
 }
 
 // htmlTagRegex matches HTML tags for stripping
