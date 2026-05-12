@@ -135,6 +135,49 @@ func TestRenderDigest_TextOutputNoHTMLTags(t *testing.T) {
 	}
 }
 
+func TestRenderDigest_TinyImagesStripped(t *testing.T) {
+	data := &DigestData{
+		ConfigName: "Test Config",
+		TotalItems: 1,
+		FeedGroups: []FeedGroup{
+			{
+				FeedName: "Test Feed",
+				FeedURL:  "https://example.com/feed",
+				Items: []FeedItem{
+					{
+						Title: "Article with callout",
+						Link:  "https://example.com/article",
+						Content: `<p>Normal text</p>
+<div><img class="h-16 w-16 rounded-xs" alt="Numa is smug" loading="lazy" src="https://stickers.xeiaso.net/sticker/numa/smug"/><span>Numa says: hi</span></div>
+<p><img src="https://example.com/photo.jpg" alt="A large photo"/></p>`,
+						Published: time.Now(),
+					},
+				},
+			},
+		},
+	}
+
+	htmlOutput, _, err := RenderDigest(data, true, 30, false, false)
+	if err != nil {
+		t.Fatalf("RenderDigest failed: %v", err)
+	}
+
+	// Verify tiny image with Tailwind sizing class is stripped
+	if strings.Contains(htmlOutput, `stickers.xeiaso.net`) {
+		t.Error("tiny sticker image was not stripped from HTML output")
+	}
+
+	// Verify normal <img> without tiny classes is preserved
+	if !strings.Contains(htmlOutput, `<img src="https://example.com/photo.jpg"`) {
+		t.Error("normal (non-tiny) image was incorrectly stripped")
+	}
+
+	// Verify surrounding text content is preserved (just the image removed)
+	if !strings.Contains(htmlOutput, "Numa says: hi") {
+		t.Error("text content around stripped image was also removed")
+	}
+}
+
 func TestRenderDigest_CodeBlockFormatting(t *testing.T) {
 	data := &DigestData{
 		ConfigName: "Test Config",

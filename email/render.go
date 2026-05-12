@@ -55,6 +55,13 @@ type templateFeedGroup struct {
 // emailUnsafeTags are HTML5 semantic tags not supported by most email clients (Gmail, Outlook, etc.)
 var emailUnsafeTags = regexp.MustCompile(`</?(?:article|section|nav|header|footer|aside|main|figure|figcaption|details|summary|mark|time|dialog)(?:\s[^>]*)?>`)
 
+// tinyImageTags matches <img> tags with small fixed dimensions (e.g., character stickers, decorative avatars).
+// The class-based patterns cover Tailwind h-8 (32px), h-12 (48px), h-16 (64px) sizing.
+// The src pattern catches images from sticker/image delivery domains.
+var tinyImageTags = regexp.MustCompile(`<img[^>]*\sclass="[^"]*\bh-(?:8|12|16)\b[^"]*"[^>]*\/?>`)
+var stickerImages = regexp.MustCompile(`<img[^>]*\ssrc="[^"]*stickers\.xeiaso\.net[^"]*"[^>]*\/?>`)
+var tinyInlineImages = regexp.MustCompile(`<img[^>]*\s(?:width|height)="(?:\d|[1-5]\d|6[0-4])"[^>]*\/?>`)
+
 // spanTags matches span tags (used to strip syntax highlighting noise from code blocks)
 var spanTags = regexp.MustCompile(`</?span(?:\s[^>]*)?>`)
 
@@ -69,6 +76,10 @@ func sanitizeHTML(html string) string {
 	sanitized := policy.Sanitize(html)
 	// Strip HTML5 semantic tags that email clients don't support
 	sanitized = emailUnsafeTags.ReplaceAllString(sanitized, "")
+	// Strip tiny decorative images (character stickers, small avatars) that don't render well in email
+	sanitized = tinyImageTags.ReplaceAllString(sanitized, "")
+	sanitized = stickerImages.ReplaceAllString(sanitized, "")
+	sanitized = tinyInlineImages.ReplaceAllString(sanitized, "")
 	// Strip span tags (removes syntax highlighting noise from code blocks)
 	sanitized = spanTags.ReplaceAllString(sanitized, "")
 	// Add styling to pre tags for better code block appearance
