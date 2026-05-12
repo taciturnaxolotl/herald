@@ -45,6 +45,7 @@ Upload a feed config via SCP, get email digests on a schedule.`,
 
 	rootCmd.AddCommand(serveCmd())
 	rootCmd.AddCommand(initCmd())
+	rootCmd.AddCommand(previewCmd())
 
 	if err := fang.Execute(
 		context.Background(),
@@ -124,6 +125,89 @@ allow_all_keys: true
 			return nil
 		},
 	}
+}
+
+func previewCmd() *cobra.Command {
+	var inline bool
+
+	cmd := &cobra.Command{
+		Use:   "preview [feed_url]",
+		Short: "Fetch an RSS feed and render email preview to HTML",
+		Long: `Fetch the given RSS feed URL, render it through Herald's email pipeline,
+write to a temp file, and open it in the browser.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			f, err := os.CreateTemp("", "herald-preview-*.html")
+			if err != nil {
+				return fmt.Errorf("create temp file: %w", err)
+			}
+			outputFile := f.Name()
+			_ = f.Close()
+
+			if err := runPreview(cmd.Context(), args[0], outputFile, inline); err != nil {
+				return err
+			}
+			return exec.Command("open", outputFile).Run()
+		},
+	}
+
+	cmd.Flags().BoolVarP(&inline, "inline", "i", true, "render inline content (false = summary only)")
+
+	return cmd
+}
+
+func runPreview(ctx context.Context, feedURL, outputFile string, inline bool) error {
+	fetched := scheduler.FetchFeed(ctx, &store.Feed{URL: feedURL})
+	if fetched.Error != nil {
+		return fmt.Errorf("fetch feed: %w", fetched.Error)
+	}
+
+	if len(fetched.Items) == 0 {
+		return fmt.Errorf("no items found in feed")
+	}
+
+	feedName := fetched.FeedName
+	if feedName == "" {
+		feedName = feedURL
+	}
+
+	var items []email.FeedItem
+	for _, item := range fetched.Items {
+		items = append(items, email.FeedItem{
+			Title:     item.Title,
+			Link:      item.Link,
+			Content:   item.Content,
+			Published: item.Published,
+		})
+	}
+
+	data := &email.DigestData{
+		ConfigName: "preview",
+		TotalItems: len(items),
+		FeedGroups: []email.FeedGroup{
+			{
+				FeedName: feedName,
+				FeedURL:  feedURL,
+				Items:    items,
+			},
+		},
+	}
+
+	htmlOutput, _, err := email.RenderDigest(data, inline, 30, false, false)
+	if err != nil {
+		return fmt.Errorf("render digest: %w", err)
+	}
+
+	gmailOutput, err := email.WrapForGMailPreview(htmlOutput, feedName)
+	if err != nil {
+		return fmt.Errorf("gmail wrap: %w", err)
+	}
+
+	if err := os.WriteFile(outputFile, []byte(gmailOutput), 0644); err != nil {
+		return fmt.Errorf("write output: %w", err)
+	}
+	logger.Info("preview written", "file", outputFile, "items", len(items))
+	return nil
 }
 
 func runServer(ctx context.Context) error {
