@@ -202,7 +202,7 @@ func (m *Mailer) Send(to, subject, htmlBody, textBody, unsubToken, dashboardURL,
 	headers["Message-ID"] = fmt.Sprintf("<%d.%s@%s>", time.Now().Unix(), generateMessageIDToken(), senderDomain(m.cfg.From))
 
 	// RFC 2369 list headers
-	headers["List-Id"] = fmt.Sprintf("<herald.%s>", m.cfg.Host)
+	headers["List-Id"] = fmt.Sprintf("<herald.%s>", senderDomain(m.cfg.From))
 	headers["List-Archive"] = fmt.Sprintf("<%s>", dashboardURL)
 	headers["List-Post"] = "NO"
 
