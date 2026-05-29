@@ -150,9 +150,9 @@ func (s *Server) commandMiddleware(next ssh.Handler) ssh.Handler {
 			return
 		}
 
-		// Check if it's an SCP command - let SCP middleware handle it
-		if len(cmd) > 0 && cmd[0] == "scp" {
-			s.logger.Debug("passing to SCP middleware")
+		// Check if it's an SCP/rsync command - let SCP middleware handle it
+		if len(cmd) > 0 && (cmd[0] == "scp" || cmd[0] == "rsync") {
+			s.logger.Debug("passing to SCP middleware", "cmd", cmd[0])
 			next(sess)
 			return
 		}
