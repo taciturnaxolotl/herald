@@ -1,6 +1,6 @@
 module github.com/kierank/herald
 
-go 1.24.2
+go 1.25.0
 
 require (
 	github.com/adhocore/gronx v1.19.6
@@ -16,8 +16,8 @@ require (
 	github.com/mmcdole/gofeed v1.3.0
 	github.com/pkg/sftp v1.13.10
 	github.com/spf13/cobra v1.10.2
-	golang.org/x/crypto v0.46.0
-	golang.org/x/sync v0.19.0
+	golang.org/x/crypto v0.52.0
+	golang.org/x/sync v0.20.0
 	golang.org/x/time v0.11.0
 	gopkg.in/yaml.v3 v3.0.1
 )
@@ -68,7 +68,7 @@ require (
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	golang.org/x/exp v0.0.0-20251219203646-944ab1f22d93 // indirect
-	golang.org/x/net v0.48.0 // indirect
-	golang.org/x/sys v0.40.0 // indirect
-	golang.org/x/text v0.33.0 // indirect
+	golang.org/x/net v0.54.0 // indirect
+	golang.org/x/sys v0.45.0 // indirect
+	golang.org/x/text v0.37.0 // indirect
 )
