@@ -8,9 +8,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"charm.land/lipgloss/v2"
+	"charm.land/log/v2"
 	"charm.land/ssh"
-	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/log"
 	"github.com/kierank/herald/scheduler"
 	"github.com/kierank/herald/store"
 )

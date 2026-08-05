@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/log/v2"
 	"github.com/charmbracelet/fang"
-	"github.com/charmbracelet/log"
 	"github.com/kierank/herald/config"
 	"github.com/kierank/herald/email"
 	"github.com/kierank/herald/scheduler"

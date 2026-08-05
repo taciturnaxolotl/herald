@@ -6,8 +6,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"charm.land/log/v2"
 	"github.com/adhocore/gronx"
-	"github.com/charmbracelet/log"
 	"github.com/kierank/herald/email"
 	"github.com/kierank/herald/ratelimit"
 	"github.com/kierank/herald/store"

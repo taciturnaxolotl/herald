@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/log"
+	"charm.land/log/v2"
 	"github.com/kierank/herald/ratelimit"
 	"github.com/kierank/herald/store"
 )
