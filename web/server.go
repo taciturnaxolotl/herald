@@ -84,10 +84,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 
 func (s *Server) rateLimitMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ip, _, err := net.SplitHostPort(r.RemoteAddr)
-		if err != nil {
-			ip = r.RemoteAddr
-		}
+		ip := clientIP(r)
 
 		if !s.rateLimiter.Allow(ip) {
 			s.metrics.RateLimitHits.Add(1)
@@ -98,6 +95,41 @@ func (s *Server) rateLimitMiddleware(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+// clientIP returns the real client address for rate limiting and logging.
+//
+// Herald runs behind a local Caddy reverse proxy, so every request arrives
+// from loopback and r.RemoteAddr is useless as an identity -- keying the rate
+// limiter on it collapses all clients into a single bucket. Caddy forwards the
+// real address in X-Forwarded-For.
+//
+// The header is only trusted when the direct peer is loopback (i.e. the proxy).
+// A direct connection to the HTTP port is keyed on its socket address instead,
+// so an attacker reaching the port cannot spoof arbitrary IPs via the header.
+// When trusted, the rightmost entry is used: that is the address the proxy
+// observed, whereas any values to its left were supplied by the client and
+// must not be believed.
+func clientIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+
+	peer := net.ParseIP(host)
+	if peer == nil || !peer.IsLoopback() {
+		return host
+	}
+
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		parts := strings.Split(xff, ",")
+		for i := len(parts) - 1; i >= 0; i-- {
+			if ip := strings.TrimSpace(parts[i]); net.ParseIP(ip) != nil {
+				return ip
+			}
+		}
+	}
+	return host
 }
 
 func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
@@ -120,7 +152,7 @@ func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
 			"path", r.URL.Path,
 			"status", lrw.statusCode,
 			"duration_ms", duration.Milliseconds(),
-			"remote_addr", r.RemoteAddr,
+			"remote_addr", clientIP(r),
 		)
 
 		if lrw.statusCode >= 500 {
