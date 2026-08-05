@@ -3,11 +3,13 @@ package scheduler
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/kierank/herald/safehttp"
 	"github.com/kierank/herald/store"
 	"github.com/mmcdole/gofeed"
 )
@@ -63,9 +65,7 @@ func FetchFeed(ctx context.Context, feed *store.Feed) *FetchResult {
 		req.Header.Set("If-Modified-Since", feed.LastModified.String)
 	}
 
-	client := &http.Client{
-		Timeout: 15 * time.Second,
-	}
+	client := safehttp.Client(feedFetchTimeout)
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -87,7 +87,7 @@ func FetchFeed(ctx context.Context, feed *store.Feed) *FetchResult {
 	result.LastModified = resp.Header.Get("Last-Modified")
 
 	parser := gofeed.NewParser()
-	parsedFeed, err := parser.Parse(resp.Body)
+	parsedFeed, err := parser.Parse(io.LimitReader(resp.Body, safehttp.MaxBodyBytes))
 	if err != nil {
 		result.Error = err
 		return result

@@ -4,12 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/mail"
-	"net/url"
 	"time"
 
 	"github.com/adhocore/gronx"
+	"github.com/kierank/herald/safehttp"
 	"github.com/mmcdole/gofeed"
 )
 
@@ -43,9 +44,8 @@ func Validate(cfg *ParsedConfig) error {
 	}
 
 	for _, feed := range cfg.Feeds {
-		u, err := url.Parse(feed.URL)
-		if err != nil || u.Scheme == "" || u.Host == "" {
-			return ErrBadFeedURL
+		if err := safehttp.ValidateURL(feed.URL); err != nil {
+			return fmt.Errorf("%w: %w", ErrBadFeedURL, err)
 		}
 	}
 
@@ -58,11 +58,13 @@ func ValidateFeedURLs(ctx context.Context, cfg *ParsedConfig) error {
 	defer cancel()
 
 	parser := gofeed.NewParser()
-	client := &http.Client{
-		Timeout: 5 * time.Second,
-	}
+	client := safehttp.Client(5 * time.Second)
 
 	for _, feed := range cfg.Feeds {
+		if err := safehttp.ValidateURL(feed.URL); err != nil {
+			return fmt.Errorf("invalid feed URL %s: %w", feed.URL, err)
+		}
+
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, feed.URL, nil)
 		if err != nil {
 			return fmt.Errorf("invalid feed URL %s: %w", feed.URL, err)
@@ -80,7 +82,7 @@ func ValidateFeedURLs(ctx context.Context, cfg *ParsedConfig) error {
 			return fmt.Errorf("feed %s returned status %d", feed.URL, resp.StatusCode)
 		}
 
-		_, err = parser.Parse(resp.Body)
+		_, err = parser.Parse(io.LimitReader(resp.Body, safehttp.MaxBodyBytes))
 		_ = resp.Body.Close()
 		if err != nil {
 			return fmt.Errorf("failed to parse feed %s: %w", feed.URL, err)

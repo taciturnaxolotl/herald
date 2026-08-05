@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"testing"
 )
 
@@ -128,7 +129,7 @@ func TestValidate_BadFeedURL(t *testing.T) {
 			Feeds:    []FeedEntry{{URL: url}},
 		}
 		err := Validate(cfg)
-		if err != ErrBadFeedURL {
+		if !errors.Is(err, ErrBadFeedURL) {
 			t.Errorf("URL %q should be invalid, got error: %v", url, err)
 		}
 	}
