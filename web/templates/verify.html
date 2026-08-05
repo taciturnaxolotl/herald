@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>HERALD - Confirm</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<h1>HERALD</h1>
+
+{{if .Success}}
+    <h2>CONFIRMED</h2>
+    <p>{{.Email}} is now confirmed. Your digests are scheduled and will start on their next run.</p>
+    <p><a href="/">Return to home</a></p>
+{{else}}
+    <h2>CONFIRM SUBSCRIPTION</h2>
+    <p><strong>EMAIL:</strong> {{.Email}}</p>
+    {{if .ShortFingerprint}}<p><strong>REQUESTED BY KEY:</strong> {{.ShortFingerprint}}</p>{{end}}
+
+    <p>Confirm that you want Herald to send email digests to this address.</p>
+
+    <form method="POST">
+        <button type="submit">Confirm this subscription</button>
+    </form>
+
+    <p style="font-size: 12px; color: #666;">
+        If you did not set this up, close this page. Nothing will be sent unless you confirm.
+    </p>
+{{end}}
+
+</body>
+</html>

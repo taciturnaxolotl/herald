@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net"
 	"path/filepath"
 	"strings"
 	"time"
@@ -241,8 +242,45 @@ func (h *scpHandler) Write(s ssh.Session, entry *scp.FileEntry) (int64, error) {
 		return 0, fmt.Errorf("commit transaction: %w", err)
 	}
 
-	h.logger.Info("config uploaded", "user_id", user.ID, "filename", name, "feeds", len(parsed.Feeds), "next_run", nextRun)
+	// Confirmed opt-in: a config only becomes active once the destination
+	// address is verified for this user. Until then keep it inactive and
+	// (rate-limited) send a confirmation email to the address.
+	verified, err := h.store.IsEmailVerified(ctx, user.ID, parsed.Email)
+	if err != nil {
+		h.logger.Warn("verification check failed", "err", err)
+	} else if !verified {
+		if err := h.store.DeactivateConfig(ctx, cfg.ID); err != nil {
+			h.logger.Warn("failed to hold unverified config inactive", "err", err)
+		}
+		ipKey := rateLimitIPKey(s.RemoteAddr())
+		status, err := h.scheduler.RequestEmailVerification(ctx, user.ID, parsed.Email, user.PubkeyFP, ipKey)
+		if err != nil {
+			h.logger.Error("failed to request email verification", "email", parsed.Email, "err", err)
+		} else {
+			h.logger.Info("email verification requested", "email", parsed.Email, "status", status.String())
+		}
+	}
+
+	h.logger.Info("config uploaded", "user_id", user.ID, "filename", name, "feeds", len(parsed.Feeds), "verified", verified)
 	return int64(len(content)), nil
+}
+
+// rateLimitIPKey derives a rate-limit bucket key from a client address. IPv4 is
+// keyed per address; IPv6 is keyed per /64, since a single host typically owns
+// a whole /64 and could otherwise rotate addresses to dodge the limit.
+func rateLimitIPKey(addr net.Addr) string {
+	host, _, err := net.SplitHostPort(addr.String())
+	if err != nil {
+		host = addr.String()
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return host
+	}
+	if v4 := ip.To4(); v4 != nil {
+		return v4.String()
+	}
+	return ip.Mask(net.CIDRMask(64, 128)).String() + "/64"
 }
 
 func calculateNextRun(cronExpr string) (time.Time, error) {

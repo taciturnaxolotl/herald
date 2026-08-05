@@ -122,6 +122,22 @@ func (db *DB) migrate() error {
 		opened_at DATETIME
 	);
 
+	-- Confirmed opt-in: a config only sends once the (user, destination email)
+	-- pair has been verified by whoever controls the mailbox. verified_at NULL
+	-- means a confirmation is still pending. last_sent_at drives a durable
+	-- per-address cooldown so the confirmation prompt itself cannot be abused.
+	CREATE TABLE IF NOT EXISTS verified_emails (
+		id INTEGER PRIMARY KEY,
+		user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		email TEXT NOT NULL,
+		verified_at DATETIME,
+		token TEXT UNIQUE,
+		token_created_at DATETIME,
+		last_sent_at DATETIME,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		UNIQUE(user_id, email)
+	);
+
 	CREATE INDEX IF NOT EXISTS idx_configs_user_id ON configs(user_id);
 	CREATE INDEX IF NOT EXISTS idx_configs_active_next_run ON configs(next_run) WHERE next_run IS NOT NULL;
 	CREATE INDEX IF NOT EXISTS idx_feeds_config_id ON feeds(config_id);
@@ -129,6 +145,9 @@ func (db *DB) migrate() error {
 	CREATE INDEX IF NOT EXISTS idx_logs_config_id ON logs(config_id);
 	CREATE INDEX IF NOT EXISTS idx_logs_created_at ON logs(created_at);
 	CREATE INDEX IF NOT EXISTS idx_unsubscribe_tokens_token ON unsubscribe_tokens(token);
+	CREATE INDEX IF NOT EXISTS idx_verified_emails_user_email ON verified_emails(user_id, email);
+	CREATE INDEX IF NOT EXISTS idx_verified_emails_token ON verified_emails(token);
+	CREATE INDEX IF NOT EXISTS idx_verified_emails_email ON verified_emails(email);
 	CREATE INDEX IF NOT EXISTS idx_email_sends_config_id ON email_sends(config_id);
 	CREATE INDEX IF NOT EXISTS idx_email_sends_tracking_token ON email_sends(tracking_token);
 	CREATE INDEX IF NOT EXISTS idx_email_sends_sent_at ON email_sends(sent_at);

@@ -120,10 +120,16 @@ func handleLs(ctx context.Context, sess ssh.Session, user *store.User, st *store
 			nextRunStr = formatRelativeTime(cfg.NextRun.Time)
 		}
 
-		printf(sess, "  %-20s %s  next: %s\n",
+		marker := ""
+		if verified, err := st.IsEmailVerified(ctx, user.ID, cfg.Email); err == nil && !verified {
+			marker = errorStyle.Render(" (unverified — check email)")
+		}
+
+		printf(sess, "  %-20s %s  next: %s%s\n",
 			cfg.Filename,
 			dimStyle.Render(fmt.Sprintf("%d feed(s)", feedCount)),
 			nextRunStr,
+			marker,
 		)
 	}
 }
@@ -173,6 +179,13 @@ func handleRun(ctx context.Context, sess ssh.Session, user *store.User, st *stor
 	cfg, err := st.GetConfig(ctx, user.ID, filename)
 	if err != nil {
 		println(sess, errorStyle.Render("Config not found: "+filename))
+		return
+	}
+
+	// Gate sending on confirmed opt-in for the destination address.
+	if verified, err := st.IsEmailVerified(ctx, user.ID, cfg.Email); err == nil && !verified {
+		println(sess, errorStyle.Render("Email not verified: "+cfg.Email))
+		println(sess, dimStyle.Render("Check that address for a confirmation link, then try again."))
 		return
 	}
 

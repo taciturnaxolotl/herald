@@ -191,6 +191,11 @@ func (s *Server) routeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if len(parts) == 2 && parts[0] == "verify" {
+		s.handleVerify(w, r, parts[1])
+		return
+	}
+
 	switch len(parts) {
 	case 1:
 		s.handleUser(w, r, parts[0])

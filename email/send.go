@@ -153,10 +153,6 @@ func (m *Mailer) ValidateConfig() error {
 }
 
 func (m *Mailer) Send(to, subject, htmlBody, textBody, unsubToken, dashboardURL, keepAliveURL string) error {
-	addr := net.JoinHostPort(m.cfg.Host, fmt.Sprintf("%d", m.cfg.Port))
-
-	boundary := "==herald-" + generateMessageIDToken() + "=="
-
 	// Add footer with keep-alive, unsubscribe, and dashboard links
 	var htmlFooter strings.Builder
 	var textFooter strings.Builder
@@ -192,30 +188,43 @@ func (m *Mailer) Send(to, subject, htmlBody, textBody, unsubToken, dashboardURL,
 		textBody = textBody + textFooter.String()
 	}
 
-	headers := make(map[string]string)
-	headers["From"] = m.cfg.From
-	headers["To"] = to
-	headers["Subject"] = mime.QEncoding.Encode("utf-8", subject)
-	headers["MIME-Version"] = "1.0"
-	headers["Content-Type"] = fmt.Sprintf("multipart/alternative; boundary=%q", boundary)
-	headers["Date"] = time.Now().Format(time.RFC1123Z)
-	headers["Message-ID"] = fmt.Sprintf("<%d.%s@%s>", time.Now().Unix(), generateMessageIDToken(), senderDomain(m.cfg.From))
-
-	// RFC 2369 list headers
-	headers["List-Id"] = fmt.Sprintf("<herald.%s>", senderDomain(m.cfg.From))
-	headers["List-Archive"] = fmt.Sprintf("<%s>", dashboardURL)
-	headers["List-Post"] = "NO"
-
-	// RFC 8058 unsubscribe headers
+	// RFC 2369 list headers + bulk hints for the recurring digest.
+	extraHeaders := map[string]string{
+		"List-Id":      fmt.Sprintf("<herald.%s>", senderDomain(m.cfg.From)),
+		"List-Archive": fmt.Sprintf("<%s>", dashboardURL),
+		"List-Post":    "NO",
+		"Precedence":   "bulk",
+		"X-Mailer":     "Herald",
+	}
+	// RFC 8058 one-click unsubscribe.
 	if unsubToken != "" {
 		unsubURL := m.unsubBaseURL + "/unsubscribe/" + unsubToken
-		headers["List-Unsubscribe"] = fmt.Sprintf("<%s>", unsubURL)
-		headers["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
+		extraHeaders["List-Unsubscribe"] = fmt.Sprintf("<%s>", unsubURL)
+		extraHeaders["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
 	}
 
-	// Bulk mail headers for better deliverability
-	headers["Precedence"] = "bulk"
-	headers["X-Mailer"] = "Herald"
+	return m.deliver(to, subject, htmlBody, textBody, extraHeaders)
+}
+
+// deliver assembles a signed multipart/alternative message and sends it. It is
+// the shared path for digests and confirmation emails; callers supply any
+// headers beyond the base set.
+func (m *Mailer) deliver(to, subject, htmlBody, textBody string, extraHeaders map[string]string) error {
+	addr := net.JoinHostPort(m.cfg.Host, fmt.Sprintf("%d", m.cfg.Port))
+	boundary := "==herald-" + generateMessageIDToken() + "=="
+
+	headers := map[string]string{
+		"From":         m.cfg.From,
+		"To":           to,
+		"Subject":      mime.QEncoding.Encode("utf-8", subject),
+		"MIME-Version": "1.0",
+		"Content-Type": fmt.Sprintf("multipart/alternative; boundary=%q", boundary),
+		"Date":         time.Now().Format(time.RFC1123Z),
+		"Message-ID":   fmt.Sprintf("<%d.%s@%s>", time.Now().Unix(), generateMessageIDToken(), senderDomain(m.cfg.From)),
+	}
+	for k, v := range extraHeaders {
+		headers[k] = v
+	}
 
 	var msg strings.Builder
 	for k, v := range headers {
@@ -226,15 +235,13 @@ func (m *Mailer) Send(to, subject, htmlBody, textBody, unsubToken, dashboardURL,
 	fmt.Fprintf(&msg, "--%s\r\n", boundary)
 	msg.WriteString("Content-Type: text/plain; charset=utf-8\r\n")
 	msg.WriteString("Content-Transfer-Encoding: quoted-printable\r\n\r\n")
-	textQP := encodeQuotedPrintable(textBody)
-	msg.WriteString(textQP)
+	msg.WriteString(encodeQuotedPrintable(textBody))
 	msg.WriteString("\r\n")
 
 	fmt.Fprintf(&msg, "--%s\r\n", boundary)
 	msg.WriteString("Content-Type: text/html; charset=utf-8\r\n")
 	msg.WriteString("Content-Transfer-Encoding: quoted-printable\r\n\r\n")
-	htmlQP := encodeQuotedPrintable(htmlBody)
-	msg.WriteString(htmlQP)
+	msg.WriteString(encodeQuotedPrintable(htmlBody))
 	msg.WriteString("\r\n")
 
 	fmt.Fprintf(&msg, "--%s--\r\n", boundary)

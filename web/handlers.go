@@ -726,6 +726,97 @@ func (s *Server) handleKeepAlive(w http.ResponseWriter, r *http.Request, token s
 	}
 }
 
+const verifyTokenTTL = 7 * 24 * time.Hour
+
+type verifyPageData struct {
+	Token            string
+	Email            string
+	ShortFingerprint string
+	Success          bool
+}
+
+func (s *Server) handleVerify(w http.ResponseWriter, r *http.Request, token string) {
+	switch r.Method {
+	case http.MethodGet:
+		s.handleVerifyGET(w, r, token)
+	case http.MethodPost:
+		s.handleVerifyPOST(w, r, token)
+	default:
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *Server) handleVerifyGET(w http.ResponseWriter, r *http.Request, token string) {
+	ctx := r.Context()
+
+	v, err := s.store.GetVerificationByToken(ctx, token, verifyTokenTTL)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			s.handle404WithMessage(w, r, "Invalid Link", "This confirmation link is invalid or has expired.")
+			return
+		}
+		s.logger.Error("get verification by token", "err", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	shortFP := ""
+	if user, err := s.store.GetUserByID(ctx, v.UserID); err == nil {
+		shortFP = user.PubkeyFP
+		if len(shortFP) > shortFingerprintLen {
+			shortFP = shortFP[:shortFingerprintLen]
+		}
+	}
+
+	// A GET is only a landing page; confirmation happens on POST so that link
+	// prefetchers (mail scanners, SafeLinks) cannot auto-confirm.
+	data := verifyPageData{
+		Token:            token,
+		Email:            v.Email,
+		ShortFingerprint: shortFP,
+	}
+	if err := s.tmpl.ExecuteTemplate(w, "verify.html", data); err != nil {
+		s.logger.Warn("render verify", "err", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+	}
+}
+
+func (s *Server) handleVerifyPOST(w http.ResponseWriter, r *http.Request, token string) {
+	ctx := r.Context()
+
+	v, err := s.store.GetVerificationByToken(ctx, token, verifyTokenTTL)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			s.handle404WithMessage(w, r, "Invalid Link", "This confirmation link is invalid or has expired.")
+			return
+		}
+		s.logger.Error("get verification by token", "err", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	if err := s.store.MarkEmailVerified(ctx, v.ID); err != nil {
+		s.logger.Error("mark email verified", "err", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	// Now that the address is confirmed, schedule the user's configs for it.
+	if err := s.store.ActivateConfigsForEmail(ctx, v.UserID, v.Email); err != nil {
+		s.logger.Error("activate configs after verify", "err", err)
+		// The address is verified; a run will still get scheduled on next
+		// upload, so surface success rather than a 500.
+	}
+
+	s.logger.Info("email verified", "user_id", v.UserID, "email", v.Email)
+
+	data := verifyPageData{Email: v.Email, Success: true}
+	if err := s.tmpl.ExecuteTemplate(w, "verify.html", data); err != nil {
+		s.logger.Warn("render verify", "err", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+	}
+}
+
 func (s *Server) handle404(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotFound)
 	data := struct {

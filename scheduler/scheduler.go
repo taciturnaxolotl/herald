@@ -31,7 +31,42 @@ const (
 	// Engagement tracking
 	inactivityThreshold      = 90 // days without opens
 	minSendsBeforeDeactivate = 3  // minimum sends before considering deactivation
+
+	// Confirmed opt-in (double opt-in) limits. A destination address gets at
+	// most one confirmation prompt per cooldown regardless of source (durable,
+	// in the DB); the per-IP and per-fingerprint caps bound spraying. The
+	// per-IP cap is the meaningful one since fresh fingerprints are free.
+	verifyEmailCooldown  = 24 * time.Hour
+	verifyIPPerDay       = 5
+	verifyFPPerDay       = 3
+	staleVerificationAge = 48 * time.Hour
+	secondsPerDay        = 86400.0
 )
+
+// VerifyStatus is the outcome of a confirmation-email request.
+type VerifyStatus int
+
+const (
+	VerifyAlreadyVerified VerifyStatus = iota // address already confirmed, nothing to do
+	VerifySent                                // confirmation email sent
+	VerifyPending                             // a recent confirmation is still outstanding (cooldown)
+	VerifyThrottled                           // per-IP or per-fingerprint cap hit
+)
+
+func (v VerifyStatus) String() string {
+	switch v {
+	case VerifyAlreadyVerified:
+		return "already-verified"
+	case VerifySent:
+		return "sent"
+	case VerifyPending:
+		return "pending"
+	case VerifyThrottled:
+		return "throttled"
+	default:
+		return "unknown"
+	}
+}
 
 // RunStats contains detailed statistics from a feed fetch run
 type RunStats struct {
@@ -43,23 +78,76 @@ type RunStats struct {
 }
 
 type Scheduler struct {
-	store       *store.DB
-	mailer      *email.Mailer
-	logger      *log.Logger
-	interval    time.Duration
-	originURL   string
-	rateLimiter *ratelimit.Limiter
+	store         *store.DB
+	mailer        *email.Mailer
+	logger        *log.Logger
+	interval      time.Duration
+	originURL     string
+	rateLimiter   *ratelimit.Limiter
+	verifyIPLimit *ratelimit.Limiter
+	verifyFPLimit *ratelimit.Limiter
 }
 
 func NewScheduler(st *store.DB, mailer *email.Mailer, logger *log.Logger, interval time.Duration, originURL string) *Scheduler {
 	return &Scheduler{
-		store:       st,
-		mailer:      mailer,
-		logger:      logger,
-		interval:    interval,
-		originURL:   originURL,
-		rateLimiter: ratelimit.New(emailsPerSecondPerUser, emailRateBurst),
+		store:         st,
+		mailer:        mailer,
+		logger:        logger,
+		interval:      interval,
+		originURL:     originURL,
+		rateLimiter:   ratelimit.New(emailsPerSecondPerUser, emailRateBurst),
+		verifyIPLimit: ratelimit.New(verifyIPPerDay/secondsPerDay, verifyIPPerDay),
+		verifyFPLimit: ratelimit.New(verifyFPPerDay/secondsPerDay, verifyFPPerDay),
 	}
+}
+
+// RequestEmailVerification sends a confirmation email for the (user, email)
+// pair unless it is already verified or a limit blocks it. It is safe to call
+// on every upload: the durable per-address cooldown and the per-IP and
+// per-fingerprint caps keep it from being turned into a mail cannon.
+func (s *Scheduler) RequestEmailVerification(ctx context.Context, userID int64, email, fingerprint, ipKey string) (VerifyStatus, error) {
+	verified, err := s.store.IsEmailVerified(ctx, userID, email)
+	if err != nil {
+		return VerifyThrottled, fmt.Errorf("check verified: %w", err)
+	}
+	if verified {
+		return VerifyAlreadyVerified, nil
+	}
+
+	v, err := s.store.EnsurePendingVerification(ctx, userID, email)
+	if err != nil {
+		return VerifyThrottled, fmt.Errorf("ensure pending: %w", err)
+	}
+
+	// Durable, global-per-address cooldown: the mailbox gets at most one prompt
+	// per window no matter how many users/keys/IPs target it. Checked before
+	// spending limiter tokens.
+	last, err := s.store.LastConfirmationToEmail(ctx, email)
+	if err != nil {
+		return VerifyThrottled, fmt.Errorf("last confirmation: %w", err)
+	}
+	if last.Valid && time.Since(last.Time) < verifyEmailCooldown {
+		return VerifyPending, nil
+	}
+
+	if ipKey != "" && !s.verifyIPLimit.Allow("verify:ip:"+ipKey) {
+		return VerifyThrottled, nil
+	}
+	if !s.verifyFPLimit.Allow("verify:fp:" + fingerprint) {
+		return VerifyThrottled, nil
+	}
+
+	if !v.Token.Valid {
+		return VerifyThrottled, fmt.Errorf("pending verification has no token")
+	}
+	verifyURL := s.originURL + "/verify/" + v.Token.String
+	if err := s.mailer.SendVerification(email, fingerprint, verifyURL); err != nil {
+		return VerifyThrottled, fmt.Errorf("send verification: %w", err)
+	}
+	if err := s.store.MarkConfirmationSent(ctx, v.ID, time.Now().UTC()); err != nil {
+		s.logger.Warn("failed to record confirmation send", "err", err)
+	}
+	return VerifySent, nil
 }
 
 func (s *Scheduler) Start(ctx context.Context) {
@@ -79,6 +167,7 @@ func (s *Scheduler) Start(ctx context.Context) {
 	// Run cleanup on start
 	s.cleanupOldSeenItems(ctx)
 	s.cleanupOldEmailSends(ctx)
+	s.cleanupStalePendingVerifications(ctx)
 
 	for {
 		select {
@@ -90,6 +179,7 @@ func (s *Scheduler) Start(ctx context.Context) {
 		case <-cleanupTicker.C:
 			s.cleanupOldSeenItems(ctx)
 			s.cleanupOldEmailSends(ctx)
+			s.cleanupStalePendingVerifications(ctx)
 		case <-engagementTicker.C:
 			s.checkAndDeactivateInactiveConfigs(ctx)
 		}
@@ -127,6 +217,23 @@ func (s *Scheduler) cleanupOldEmailSends(ctx context.Context) {
 	}
 	if deleted > 0 {
 		s.logger.Info("cleaned up old email sends", "deleted", deleted)
+	}
+}
+
+func (s *Scheduler) cleanupStalePendingVerifications(ctx context.Context) {
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.Error("panic during verification cleanup", "panic", r)
+		}
+	}()
+
+	deleted, err := s.store.DeleteStalePendingVerifications(ctx, staleVerificationAge)
+	if err != nil {
+		s.logger.Error("failed to clean up stale verifications", "err", err)
+		return
+	}
+	if deleted > 0 {
+		s.logger.Info("cleaned up stale pending verifications", "deleted", deleted)
 	}
 }
 
