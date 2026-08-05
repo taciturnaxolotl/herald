@@ -32,7 +32,7 @@
             version = "0.1.1";
             subPackages = [ "." ];
             src = self;
-            vendorHash = "sha256-SjxTy/ecSUYaJJ8dpfQFLF7WgVEpnKcu5qWcqyw611Q=";
+            vendorHash = "sha256-vBRIoRU2+7oKp40l6C4NNQ6hX2HoCkLbGonp2/yp1Ag=";
             proxyVendor = true;
             ldflags = [
               "-X main.commitHash=${self.rev or self.dirtyRev or "dev"}"
