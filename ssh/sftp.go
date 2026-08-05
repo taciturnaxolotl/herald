@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/ssh"
 	"github.com/charmbracelet/log"
-	"github.com/charmbracelet/ssh"
 	"github.com/kierank/herald/config"
 	"github.com/kierank/herald/scheduler"
 	"github.com/kierank/herald/store"

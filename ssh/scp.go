@@ -12,10 +12,10 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/ssh"
+	"charm.land/wish/v2/scp"
 	"github.com/adhocore/gronx"
 	"github.com/charmbracelet/log"
-	"github.com/charmbracelet/ssh"
-	"github.com/charmbracelet/wish/scp"
 	"github.com/kierank/herald/config"
 	"github.com/kierank/herald/ratelimit"
 	"github.com/kierank/herald/scheduler"
