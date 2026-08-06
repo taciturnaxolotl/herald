@@ -63,7 +63,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 		wish.WithAddress(fmt.Sprintf("%s:%d", s.cfg.Host, s.cfg.Port)),
 		wish.WithHostKeyPath(s.cfg.HostKeyPath),
 		wish.WithPublicKeyAuth(s.publicKeyHandler),
-		wish.WithSubsystem("sftp", SFTPHandler(s.store, s.scheduler, s.logger)),
+		wish.WithSubsystem("sftp", SFTPHandler(s.store, s.scheduler, s.logger, s.rateLimiter)),
 		wish.WithMiddleware(
 			scp.Middleware(handler, handler),
 			s.commandMiddleware,
@@ -150,10 +150,21 @@ func (s *Server) commandMiddleware(next ssh.Handler) ssh.Handler {
 			return
 		}
 
-		// Check if it's an SCP/rsync command - let SCP middleware handle it
-		if len(cmd) > 0 && (cmd[0] == "scp" || cmd[0] == "rsync") {
-			s.logger.Debug("passing to SCP middleware", "cmd", cmd[0])
+		// scp is handled by the SCP middleware (and default scp uses the sftp
+		// subsystem, handled separately).
+		if cmd[0] == "scp" {
+			s.logger.Debug("passing to SCP middleware")
 			next(sess)
+			return
+		}
+
+		// rsync is not supported: Herald has no real filesystem, uploads are
+		// parsed into config records. Fail with a clear hint instead of the
+		// cryptic "unexpected end of file" the client gets when the server
+		// never speaks the rsync protocol.
+		if cmd[0] == "rsync" {
+			printf(sess.Stderr(), "herald: rsync is not supported. Upload with scp instead:\n  scp %s.txt %s:\n", "feeds", sess.User())
+			_ = sess.Exit(2)
 			return
 		}
 
