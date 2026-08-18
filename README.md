@@ -77,6 +77,9 @@ ssh herald.dunkirk.sh deactivate feeds.txt
 # Run immediately (don't wait for cron)
 ssh herald.dunkirk.sh run feeds.txt
 
+# Re-send the confirmation email for a config's address
+ssh herald.dunkirk.sh verify feeds.txt
+
 # Show recent activity
 ssh herald.dunkirk.sh logs
 ```

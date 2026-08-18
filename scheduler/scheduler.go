@@ -39,7 +39,7 @@ const (
 	verifyEmailCooldown  = 24 * time.Hour
 	verifyIPPerDay       = 5
 	verifyFPPerDay       = 3
-	staleVerificationAge = 48 * time.Hour
+	staleVerificationAge = 7 * 24 * time.Hour // matches the confirmation link's TTL
 	secondsPerDay        = 86400.0
 )
 
@@ -450,6 +450,22 @@ func (s *Scheduler) collectNewItems(ctx context.Context, results []*FetchResult)
 
 func (s *Scheduler) sendDigestAndMarkSeen(ctx context.Context, cfg *store.Config, feedGroups []email.FeedGroup, totalNew int, results []*FetchResult) error {
 	s.logger.Debug("sendDigestAndMarkSeen: start", "totalNew", totalNew)
+
+	// Confirmed opt-in is enforced here, at the one point every send path funnels
+	// through. Scheduling is the fast gate; this is the one that has to hold, and
+	// it fails closed: an error checking means no send.
+	verified, err := s.store.IsEmailVerified(ctx, cfg.UserID, cfg.Email)
+	if err != nil {
+		return fmt.Errorf("check verified: %w", err)
+	}
+	if !verified {
+		if err := s.store.UpdateNextRun(ctx, cfg.ID, nil); err != nil {
+			s.logger.Warn("failed to deactivate unverified config", "config_id", cfg.ID, "err", err)
+		}
+		_ = s.store.AddLog(ctx, cfg.ID, "error", "Held: "+cfg.Email+" is not verified. Run `verify "+cfg.Filename+"` over SSH to get a new confirmation link.")
+		return fmt.Errorf("email not verified: %s", cfg.Email)
+	}
+
 	digestData := &email.DigestData{
 		ConfigName: cfg.Filename,
 		TotalItems: totalNew,

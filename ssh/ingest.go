@@ -85,11 +85,16 @@ func ingestConfig(ctx context.Context, st *store.DB, sched *scheduler.Scheduler,
 	// (rate-limited) send a confirmation email.
 	verified, err := st.IsEmailVerified(ctx, user.ID, parsed.Email)
 	if err != nil {
-		logger.Warn("verification check failed", "err", err)
-	} else if !verified {
+		// Fail closed: an unanswered check holds the config rather than letting
+		// it run against an address nobody has confirmed.
+		logger.Warn("verification check failed, holding config inactive", "err", err)
+	}
+	if err != nil || !verified {
 		if err := st.DeactivateConfig(ctx, cfg.ID); err != nil {
 			logger.Warn("failed to hold unverified config inactive", "err", err)
 		}
+	}
+	if err == nil && !verified {
 		ipKey := ""
 		if remoteAddr != nil {
 			ipKey = rateLimitIPKey(remoteAddr)

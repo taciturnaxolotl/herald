@@ -86,11 +86,17 @@ func HandleCommand(sess ssh.Session, user *store.User, st *store.DB, sched *sche
 			return
 		}
 		handleRun(ctx, sess, user, st, sched, cmd[1])
+	case "verify":
+		if len(cmd) < 2 {
+			println(sess, errorStyle.Render("Usage: verify <filename>"))
+			return
+		}
+		handleVerify(ctx, sess, user, st, sched, cmd[1])
 	case "logs":
 		handleLogs(ctx, sess, user, st)
 	default:
 		printf(sess, errorStyle.Render("Unknown command: %s\n"), cmd[0])
-		println(sess, "Available commands: ls, cat, rm, activate, deactivate, run, logs")
+		println(sess, "Available commands: ls, cat, rm, activate, deactivate, run, verify, logs")
 	}
 }
 
@@ -156,7 +162,22 @@ func handleRm(ctx context.Context, sess ssh.Session, user *store.User, st *store
 }
 
 func handleActivate(ctx context.Context, sess ssh.Session, user *store.User, st *store.DB, filename string) {
-	err := st.ActivateConfig(ctx, user.ID, filename)
+	cfg, err := st.GetConfig(ctx, user.ID, filename)
+	if err != nil {
+		println(sess, errorStyle.Render("Config not found: "+filename))
+		return
+	}
+
+	// Scheduling is what makes a config send, so it carries the same opt-in gate
+	// as running one by hand.
+	verified, err := st.IsEmailVerified(ctx, user.ID, cfg.Email)
+	if err != nil || !verified {
+		println(sess, errorStyle.Render("Email not verified: "+cfg.Email))
+		println(sess, dimStyle.Render("Run `verify "+filename+"` to get a fresh confirmation link."))
+		return
+	}
+
+	err = st.ActivateConfig(ctx, user.ID, filename)
 	if err != nil {
 		println(sess, errorStyle.Render("Error: "+err.Error()))
 		return
@@ -183,9 +204,9 @@ func handleRun(ctx context.Context, sess ssh.Session, user *store.User, st *stor
 	}
 
 	// Gate sending on confirmed opt-in for the destination address.
-	if verified, err := st.IsEmailVerified(ctx, user.ID, cfg.Email); err == nil && !verified {
+	if verified, err := st.IsEmailVerified(ctx, user.ID, cfg.Email); err != nil || !verified {
 		println(sess, errorStyle.Render("Email not verified: "+cfg.Email))
-		println(sess, dimStyle.Render("Check that address for a confirmation link, then try again."))
+		println(sess, dimStyle.Render("Run `verify "+filename+"` to get a fresh confirmation link."))
 		return
 	}
 
@@ -265,6 +286,39 @@ func handleRun(ctx context.Context, sess ssh.Session, user *store.User, st *stor
 				println(sess, dimStyle.Render(fmt.Sprintf("Found %d new item(s) but did not send email", res.stats.NewItems)))
 			}
 		}
+	}
+}
+
+// handleVerify re-sends the confirmation email for a config's address. The
+// scheduler owns the cooldown and the per-IP and per-key caps, so this is just
+// a way to ask again after the first link is lost or expired.
+func handleVerify(ctx context.Context, sess ssh.Session, user *store.User, st *store.DB, sched *scheduler.Scheduler, filename string) {
+	cfg, err := st.GetConfig(ctx, user.ID, filename)
+	if err != nil {
+		println(sess, errorStyle.Render("Config not found: "+filename))
+		return
+	}
+
+	ipKey := ""
+	if addr := sess.RemoteAddr(); addr != nil {
+		ipKey = rateLimitIPKey(addr)
+	}
+
+	status, err := sched.RequestEmailVerification(ctx, user.ID, cfg.Email, user.PubkeyFP, ipKey)
+	if err != nil {
+		println(sess, errorStyle.Render("Could not send confirmation: "+err.Error()))
+		return
+	}
+
+	switch status {
+	case scheduler.VerifyAlreadyVerified:
+		println(sess, successStyle.Render(cfg.Email+" is already verified."))
+	case scheduler.VerifySent:
+		println(sess, successStyle.Render("Confirmation sent to "+cfg.Email))
+	case scheduler.VerifyPending:
+		println(sess, dimStyle.Render("A confirmation was sent to "+cfg.Email+" recently. Check that mailbox, including spam."))
+	case scheduler.VerifyThrottled:
+		println(sess, errorStyle.Render("Too many confirmation requests. Try again tomorrow."))
 	}
 }
 
