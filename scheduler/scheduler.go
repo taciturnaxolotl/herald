@@ -530,7 +530,7 @@ func (s *Scheduler) sendDigestAndMarkSeen(ctx context.Context, cfg *store.Config
 	s.logger.Debug("sendDigestAndMarkSeen: generated tracking token")
 
 	// Record email send with tracking (within transaction)
-	subject := "feed digest"
+	subject := email.DigestSubject(digestData)
 	s.logger.Debug("sendDigestAndMarkSeen: recording email send")
 	if err := s.store.RecordEmailSendTx(tx, cfg.ID, cfg.Email, subject, trackingToken); err != nil {
 		s.logger.Warn("failed to record email send", "err", err)

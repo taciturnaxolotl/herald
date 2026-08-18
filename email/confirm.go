@@ -54,7 +54,7 @@ func (m *Mailer) SendVerification(to, fingerprint, verifyURL string) error {
 	// from yet).
 	extraHeaders := map[string]string{
 		"Auto-Submitted": "auto-generated",
-		"X-Mailer":       "Herald",
+		"Reply-To":       m.fromAddress(),
 	}
 
 	return m.deliver(to, "Confirm your Herald subscription", htmlBuf.String(), textBody, extraHeaders)

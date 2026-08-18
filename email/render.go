@@ -227,6 +227,24 @@ func init() {
 	policy = bluemonday.UGCPolicy()
 }
 
+// DigestSubject names the source and counts the entries. A subject that varies
+// per send reads as real list mail; a constant one reads as a blast.
+func DigestSubject(data *DigestData) string {
+	entries := "entries"
+	if data.TotalItems == 1 {
+		entries = "entry"
+	}
+
+	switch {
+	case len(data.FeedGroups) == 1:
+		return fmt.Sprintf("%s: %d new %s", data.FeedGroups[0].FeedName, data.TotalItems, entries)
+	case data.ConfigName != "":
+		return fmt.Sprintf("%s: %d new %s from %d feeds", data.ConfigName, data.TotalItems, entries, len(data.FeedGroups))
+	default:
+		return fmt.Sprintf("%d new %s from %d feeds", data.TotalItems, entries, len(data.FeedGroups))
+	}
+}
+
 func RenderDigest(data *DigestData, inline bool, daysUntilExpiry int, showUrgentBanner, showWarningBanner bool) (html string, text string, err error) {
 	// Convert FeedGroups to templateFeedGroups with sanitized HTML content
 	sanitizedGroups := make([]templateFeedGroup, len(data.FeedGroups))

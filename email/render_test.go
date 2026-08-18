@@ -224,3 +224,26 @@ echo hello</pre><p>Done.</p>`,
 		t.Error("Text output should not contain HTML tags")
 	}
 }
+
+func TestDigestSubject(t *testing.T) {
+	single := &DigestData{ConfigName: "feeds", TotalItems: 1, FeedGroups: []FeedGroup{{FeedName: "Xe's Blog"}}}
+	if got := DigestSubject(single); got != "Xe's Blog: 1 new entry" {
+		t.Errorf("single feed subject = %q", got)
+	}
+
+	many := &DigestData{ConfigName: "feeds", TotalItems: 12, FeedGroups: []FeedGroup{{FeedName: "a"}, {FeedName: "b"}}}
+	if got := DigestSubject(many); got != "feeds: 12 new entries from 2 feeds" {
+		t.Errorf("multi feed subject = %q", got)
+	}
+}
+
+func TestInjectHTMLFooter(t *testing.T) {
+	got := injectHTMLFooter("<html><body><p>hi</p></body></html>", "<hr>")
+	if got != "<html><body><p>hi</p><hr></body></html>" {
+		t.Errorf("footer landed outside body: %q", got)
+	}
+
+	if got := injectHTMLFooter("<p>hi</p>", "<hr>"); got != "<p>hi</p><hr>" {
+		t.Errorf("fragment append = %q", got)
+	}
+}

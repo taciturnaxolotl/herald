@@ -12,6 +12,7 @@ import (
 	"mime"
 	"mime/quotedprintable"
 	"net"
+	"net/mail"
 	"net/smtp"
 	"os"
 	"strings"
@@ -184,17 +185,21 @@ func (m *Mailer) Send(to, subject, htmlBody, textBody, unsubToken, dashboardURL,
 		}
 
 		htmlFooter.WriteString("</p>")
-		htmlBody = htmlBody + htmlFooter.String()
+		htmlBody = injectHTMLFooter(htmlBody, htmlFooter.String())
 		textBody = textBody + textFooter.String()
 	}
 
 	// RFC 2369 list headers + bulk hints for the recurring digest.
+	from := m.fromAddress()
 	extraHeaders := map[string]string{
-		"List-Id":      fmt.Sprintf("<herald.%s>", senderDomain(m.cfg.From)),
-		"List-Archive": fmt.Sprintf("<%s>", dashboardURL),
-		"List-Post":    "NO",
-		"Precedence":   "bulk",
-		"X-Mailer":     "Herald",
+		"List-Id":          fmt.Sprintf("<herald.%s>", senderDomain(from)),
+		"List-Post":        "NO",
+		"Precedence":       "bulk",
+		"Reply-To":         from,
+		"X-MC-MailingList": from,
+	}
+	if dashboardURL != "" {
+		extraHeaders["List-Archive"] = fmt.Sprintf("<%s>", dashboardURL)
 	}
 	// RFC 8058 one-click unsubscribe.
 	if unsubToken != "" {
@@ -214,13 +219,13 @@ func (m *Mailer) deliver(to, subject, htmlBody, textBody string, extraHeaders ma
 	boundary := "==herald-" + generateMessageIDToken() + "=="
 
 	headers := map[string]string{
-		"From":         m.cfg.From,
+		"From":         m.fromHeader(),
 		"To":           to,
 		"Subject":      mime.QEncoding.Encode("utf-8", subject),
 		"MIME-Version": "1.0",
 		"Content-Type": fmt.Sprintf("multipart/alternative; boundary=%q", boundary),
 		"Date":         time.Now().Format(time.RFC1123Z),
-		"Message-ID":   fmt.Sprintf("<%d.%s@%s>", time.Now().Unix(), generateMessageIDToken(), senderDomain(m.cfg.From)),
+		"Message-ID":   fmt.Sprintf("<%d.%s@%s>", time.Now().Unix(), generateMessageIDToken(), senderDomain(m.fromAddress())),
 	}
 	for k, v := range extraHeaders {
 		headers[k] = v
@@ -267,6 +272,38 @@ func (m *Mailer) deliver(to, subject, htmlBody, textBody string, extraHeaders ma
 	}
 
 	return m.sendWithSTARTTLS(addr, auth, to, messageBytes)
+}
+
+// fromAddress returns the bare address of the configured sender, which may be
+// written with a display name. The envelope sender must never carry one.
+func (m *Mailer) fromAddress() string {
+	if a, err := mail.ParseAddress(m.cfg.From); err == nil {
+		return a.Address
+	}
+	return m.cfg.From
+}
+
+// fromHeader returns the From header, naming the sender when the configured
+// address does not. A bare address reads as machine traffic to spam filters.
+func (m *Mailer) fromHeader() string {
+	a, err := mail.ParseAddress(m.cfg.From)
+	if err != nil {
+		return m.cfg.From
+	}
+	if a.Name == "" {
+		a.Name = "Herald"
+	}
+	return a.String()
+}
+
+// injectHTMLFooter places the footer inside the document body. Appending it
+// after </html> leaves content outside the root element, which is malformed
+// and a well-worn spam heuristic.
+func injectHTMLFooter(html, footer string) string {
+	if i := strings.LastIndex(strings.ToLower(html), "</body>"); i >= 0 {
+		return html[:i] + footer + html[i:]
+	}
+	return html + footer
 }
 
 // senderDomain extracts the domain part from an email address.
@@ -321,7 +358,7 @@ func (m *Mailer) sendWithTLS(addr string, auth smtp.Auth, to string, msg []byte)
 		}
 	}
 
-	if err = client.Mail(m.cfg.From); err != nil {
+	if err = client.Mail(m.fromAddress()); err != nil {
 		return fmt.Errorf("mail from: %w", err)
 	}
 
@@ -376,7 +413,7 @@ func (m *Mailer) sendWithSTARTTLS(addr string, auth smtp.Auth, to string, msg []
 		}
 	}
 
-	if err = client.Mail(m.cfg.From); err != nil {
+	if err = client.Mail(m.fromAddress()); err != nil {
 		return fmt.Errorf("mail from: %w", err)
 	}
 
@@ -420,6 +457,9 @@ func (m *Mailer) signDKIM(message []byte) ([]byte, error) {
 			"List-Unsubscribe-Post",
 			"List-Post",
 			"Precedence",
+			"Reply-To",
+			"X-MC-MailingList",
+			"Auto-Submitted",
 		},
 		Expiration: time.Now().Add(72 * time.Hour),
 	}
