@@ -15,6 +15,7 @@ import (
 	"net/mail"
 	"net/smtp"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -123,7 +124,8 @@ func (m *Mailer) ValidateConfig() error {
 	}
 
 	// Port 587 uses STARTTLS
-	conn, err := net.Dial("tcp", addr)
+	dialer := &net.Dialer{Timeout: 30 * time.Second}
+	conn, err := dialer.Dial("tcp", addr)
 	if err != nil {
 		return fmt.Errorf("dial: %w", err)
 	}
@@ -192,6 +194,7 @@ func (m *Mailer) Send(to, subject, htmlBody, textBody, unsubToken, dashboardURL,
 	// RFC 2369 list headers + bulk hints for the recurring digest.
 	from := m.fromAddress()
 	extraHeaders := map[string]string{
+		"Auto-Submitted":   "auto-generated",
 		"List-Id":          fmt.Sprintf("<herald.%s>", senderDomain(from)),
 		"List-Post":        "NO",
 		"Precedence":       "bulk",
@@ -218,22 +221,33 @@ func (m *Mailer) deliver(to, subject, htmlBody, textBody string, extraHeaders ma
 	addr := net.JoinHostPort(m.cfg.Host, fmt.Sprintf("%d", m.cfg.Port))
 	boundary := "==herald-" + generateMessageIDToken() + "=="
 
-	headers := map[string]string{
-		"From":         m.fromHeader(),
-		"To":           to,
-		"Subject":      mime.QEncoding.Encode("utf-8", subject),
-		"MIME-Version": "1.0",
-		"Content-Type": fmt.Sprintf("multipart/alternative; boundary=%q", boundary),
-		"Date":         time.Now().Format(time.RFC1123Z),
-		"Message-ID":   fmt.Sprintf("<%d.%s@%s>", time.Now().Unix(), generateMessageIDToken(), senderDomain(m.fromAddress())),
-	}
-	for k, v := range extraHeaders {
-		headers[k] = v
+	// Fixed-order base headers for reproducible output. Real MUAs emit a
+	// stable conventional order; per-message shuffling is an anomaly that
+	// content filters notice.
+	type header struct{ key, value string }
+	base := []header{
+		{"From", m.fromHeader()},
+		{"To", to},
+		{"Subject", mime.QEncoding.Encode("utf-8", subject)},
+		{"Date", time.Now().Format(time.RFC1123Z)},
+		{"Message-ID", fmt.Sprintf("<%d.%s@%s>", time.Now().Unix(), generateMessageIDToken(), senderDomain(m.fromAddress()))},
+		{"MIME-Version", "1.0"},
+		{"Content-Type", fmt.Sprintf("multipart/alternative; boundary=%q", boundary)},
 	}
 
 	var msg strings.Builder
-	for k, v := range headers {
-		fmt.Fprintf(&msg, "%s: %s\r\n", k, v)
+	for _, h := range base {
+		fmt.Fprintf(&msg, "%s: %s\r\n", h.key, h.value)
+	}
+
+	// Extra headers in sorted order for determinism.
+	extraKeys := make([]string, 0, len(extraHeaders))
+	for k := range extraHeaders {
+		extraKeys = append(extraKeys, k)
+	}
+	sort.Strings(extraKeys)
+	for _, k := range extraKeys {
+		fmt.Fprintf(&msg, "%s: %s\r\n", k, extraHeaders[k])
 	}
 	msg.WriteString("\r\n")
 
@@ -452,16 +466,22 @@ func (m *Mailer) signDKIM(message []byte) ([]byte, error) {
 			"Message-ID",
 			"MIME-Version",
 			"Content-Type",
+			"Auto-Submitted",
 			"List-Id",
 			"List-Unsubscribe",
 			"List-Unsubscribe-Post",
 			"List-Post",
+			"List-Archive",
+			// Oversign List-* headers so intermediaries can't inject them.
+			"List-Id",
+			"List-Unsubscribe",
+			"List-Unsubscribe-Post",
+			"List-Post",
+			"List-Archive",
 			"Precedence",
 			"Reply-To",
 			"X-MC-MailingList",
-			"Auto-Submitted",
 		},
-		Expiration: time.Now().Add(72 * time.Hour),
 	}
 
 	var b bytes.Buffer

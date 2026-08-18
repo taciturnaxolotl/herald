@@ -220,7 +220,7 @@ type dirInfo struct{}
 
 func (d *dirInfo) Name() string       { return "." }
 func (d *dirInfo) Size() int64        { return 0 }
-func (d *dirInfo) Mode() fs.FileMode  { return fs.ModeDir | 0755 }
+func (d *dirInfo) Mode() fs.FileMode  { return fs.ModeDir | 0o755 }
 func (d *dirInfo) ModTime() time.Time { return time.Now() }
 func (d *dirInfo) IsDir() bool        { return true }
 func (d *dirInfo) Sys() any           { return nil }

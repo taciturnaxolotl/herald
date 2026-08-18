@@ -209,7 +209,7 @@ func (s *Server) ensureHostKey() error {
 	}
 
 	pemBlock := pem.EncodeToMemory(privBytes)
-	if err := os.WriteFile(s.cfg.HostKeyPath, pemBlock, 0600); err != nil {
+	if err := os.WriteFile(s.cfg.HostKeyPath, pemBlock, 0o600); err != nil {
 		return fmt.Errorf("failed to write host key: %w", err)
 	}
 

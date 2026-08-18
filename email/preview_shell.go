@@ -108,8 +108,10 @@ const gmailShellTemplate = `<!DOCTYPE html>
 
 // gmailUnwrap matches a full HTML document and extracts the body content.
 // Gmail strips <html>/<head>/<body> wrappers, so we simulate that.
-var gmailUnwrapHead = regexp.MustCompile(`(?s)<!DOCTYPE[^>]*>\s*<html[^>]*>\s*<head[^>]*>.*?</head>`)
-var gmailUnwrapBody = regexp.MustCompile(`(?s)<body[^>]*>(.*)</body>\s*</html>`)
+var (
+	gmailUnwrapHead = regexp.MustCompile(`(?s)<!DOCTYPE[^>]*>\s*<html[^>]*>\s*<head[^>]*>.*?</head>`)
+	gmailUnwrapBody = regexp.MustCompile(`(?s)<body[^>]*>(.*)</body>\s*</html>`)
+)
 
 // WrapForGMailPreview takes a full HTML digest document and wraps it in a
 // Gmail shell for realistic preview rendering.

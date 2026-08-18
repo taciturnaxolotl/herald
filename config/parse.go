@@ -13,11 +13,12 @@ type FeedEntry struct {
 }
 
 type ParsedConfig struct {
-	Email    string
-	CronExpr string
-	Digest   bool
-	Inline   bool
-	Feeds    []FeedEntry
+	Email           string
+	CronExpr        string
+	Digest          bool
+	Inline          bool
+	StripImageHosts []string
+	Feeds           []FeedEntry
 }
 
 var feedLineRegex = regexp.MustCompile(`^=>\s+(\S+)(?:\s+"([^"]*)")?$`)
@@ -71,6 +72,13 @@ func parseDirective(cfg *ParsedConfig, line string) error {
 		cfg.Digest = parseBool(value, true)
 	case "inline":
 		cfg.Inline = parseBool(value, false)
+	case "strip_image_hosts":
+		for _, h := range strings.Split(value, ",") {
+			h = strings.TrimSpace(h)
+			if h != "" {
+				cfg.StripImageHosts = append(cfg.StripImageHosts, h)
+			}
+		}
 	}
 
 	return nil

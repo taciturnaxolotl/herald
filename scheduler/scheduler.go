@@ -8,6 +8,7 @@ import (
 
 	"charm.land/log/v2"
 	"github.com/adhocore/gronx"
+	"github.com/kierank/herald/config"
 	"github.com/kierank/herald/email"
 	"github.com/kierank/herald/ratelimit"
 	"github.com/kierank/herald/store"
@@ -470,6 +471,11 @@ func (s *Scheduler) sendDigestAndMarkSeen(ctx context.Context, cfg *store.Config
 		ConfigName: cfg.Filename,
 		TotalItems: totalNew,
 		FeedGroups: feedGroups,
+	}
+
+	// Parse strip_image_hosts from raw config text.
+	if parsed, err := config.Parse(cfg.RawText); err == nil {
+		digestData.StripImageHosts = parsed.StripImageHosts
 	}
 
 	inline := cfg.InlineContent

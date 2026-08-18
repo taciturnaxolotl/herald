@@ -84,7 +84,7 @@ func (h *scpHandler) NewFileEntry(s ssh.Session, name string) (*scp.FileEntry, f
 	content := []byte(cfg.RawText)
 	entry := &scp.FileEntry{
 		Name:     cfg.Filename,
-		Mode:     0644,
+		Mode:     0o644,
 		Size:     int64(len(content)),
 		Mtime:    cfg.CreatedAt.Unix(),
 		Atime:    cfg.CreatedAt.Unix(),
@@ -155,7 +155,7 @@ type configFileInfo struct {
 
 func (i *configFileInfo) Name() string       { return i.cfg.Filename }
 func (i *configFileInfo) Size() int64        { return int64(len(i.cfg.RawText)) }
-func (i *configFileInfo) Mode() fs.FileMode  { return 0644 }
+func (i *configFileInfo) Mode() fs.FileMode  { return 0o644 }
 func (i *configFileInfo) ModTime() time.Time { return i.cfg.CreatedAt }
 func (i *configFileInfo) IsDir() bool        { return false }
 func (i *configFileInfo) Sys() any           { return nil }

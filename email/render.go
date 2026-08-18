@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"embed"
 	"fmt"
+	"html"
 	htmltemplate "html/template"
 	"regexp"
 	"strings"
@@ -17,9 +18,10 @@ import (
 var templateFS embed.FS
 
 type DigestData struct {
-	ConfigName string
-	TotalItems int
-	FeedGroups []FeedGroup
+	ConfigName      string
+	TotalItems      int
+	FeedGroups      []FeedGroup
+	StripImageHosts []string
 }
 
 type FeedGroup struct {
@@ -58,9 +60,10 @@ var emailUnsafeTags = regexp.MustCompile(`</?(?:article|section|nav|header|foote
 // tinyImageTags matches <img> tags with small fixed dimensions (e.g., character stickers, decorative avatars).
 // The class-based patterns cover Tailwind h-8 (32px), h-12 (48px), h-16 (64px) sizing.
 // The src pattern catches images from sticker/image delivery domains.
-var tinyImageTags = regexp.MustCompile(`<img[^>]*\sclass="[^"]*\bh-(?:8|12|16)\b[^"]*"[^>]*\/?>`)
-var stickerImages = regexp.MustCompile(`<img[^>]*\ssrc="[^"]*stickers\.xeiaso\.net[^"]*"[^>]*\/?>`)
-var tinyInlineImages = regexp.MustCompile(`<img[^>]*\s(?:width|height)="(?:\d|[1-5]\d|6[0-4])"[^>]*\/?>`)
+var (
+	tinyImageTags    = regexp.MustCompile(`<img[^>]*\sclass="[^"]*\bh-(?:8|12|16)\b[^"]*"[^>]*\/?>`)
+	tinyInlineImages = regexp.MustCompile(`<img[^>]*\s(?:width|height)="(?:\d|[1-5]\d|6[0-4])"[^>]*\/?>`)
+)
 
 // spanTags matches span tags (used to strip syntax highlighting noise from code blocks)
 var spanTags = regexp.MustCompile(`</?span(?:\s[^>]*)?>`)
@@ -74,14 +77,18 @@ var preTagOpen = regexp.MustCompile(`<pre(?:\s[^>]*)?>`)
 // codeBlockStyle is inline CSS for code blocks in emails
 const codeBlockStyle = `<pre style="background-color:#f5f5f5;padding:12px;border-radius:4px;overflow-x:auto;font-family:monospace;font-size:13px;line-height:1.4">`
 
-// sanitizeHTML sanitizes HTML content, allowing safe tags while stripping styles and unsafe elements
-func sanitizeHTML(html string) string {
-	sanitized := policy.Sanitize(html)
+// sanitizeHTML sanitizes HTML content, allowing safe tags while stripping styles and unsafe elements.
+// stripHosts lists image source hosts whose <img> tags should be removed.
+func sanitizeHTML(htmlStr string, stripHosts []string) string {
+	sanitized := policy.Sanitize(htmlStr)
 	// Strip HTML5 semantic tags that email clients don't support
 	sanitized = emailUnsafeTags.ReplaceAllString(sanitized, "")
 	// Strip tiny decorative images (character stickers, small avatars) that don't render well in email
 	sanitized = tinyImageTags.ReplaceAllString(sanitized, "")
-	sanitized = stickerImages.ReplaceAllString(sanitized, "")
+	for _, host := range stripHosts {
+		re := regexp.MustCompile(`<img[^>]*\ssrc="[^"]*` + regexp.QuoteMeta(host) + `[^"]*"[^>]*\/?>`)
+		sanitized = re.ReplaceAllString(sanitized, "")
+	}
 	sanitized = tinyInlineImages.ReplaceAllString(sanitized, "")
 	// Strip span tags (removes syntax highlighting noise from code blocks)
 	sanitized = spanTags.ReplaceAllString(sanitized, "")
@@ -151,15 +158,10 @@ var whitespaceCollapse = regexp.MustCompile(`[ \t]+`)
 // multipleNewlines collapses 3+ newlines to 2
 var multipleNewlines = regexp.MustCompile(`\n{3,}`)
 
-// decodeEntities decodes common HTML entities
+// decodeEntities decodes HTML entities using the stdlib, which handles the
+// full set (named, numeric, hex) without double-decoding.
 func decodeEntities(text string) string {
-	text = strings.ReplaceAll(text, "&amp;", "&")
-	text = strings.ReplaceAll(text, "&lt;", "<")
-	text = strings.ReplaceAll(text, "&gt;", ">")
-	text = strings.ReplaceAll(text, "&quot;", "\"")
-	text = strings.ReplaceAll(text, "&#39;", "'")
-	text = strings.ReplaceAll(text, "&nbsp;", " ")
-	return text
+	return html.UnescapeString(text)
 }
 
 // stripHTML removes all HTML tags and decodes entities for plain text output
@@ -256,7 +258,7 @@ func RenderDigest(data *DigestData, inline bool, daysUntilExpiry int, showUrgent
 				Link:             item.Link,
 				Content:          item.Content,
 				PlainContent:     stripHTML(item.Content),
-				SanitizedContent: htmltemplate.HTML(sanitizeHTML(item.Content)), // #nosec G203 -- Content is sanitized by bluemonday before conversion
+				SanitizedContent: htmltemplate.HTML(sanitizeHTML(item.Content, data.StripImageHosts)), // #nosec G203 -- Content is sanitized by bluemonday before conversion
 				Published:        item.Published,
 			}
 		}

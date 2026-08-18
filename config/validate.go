@@ -27,9 +27,11 @@ func Validate(cfg *ParsedConfig) error {
 	if cfg.Email == "" {
 		return ErrNoEmail
 	}
-	if _, err := mail.ParseAddress(cfg.Email); err != nil {
+	a, err := mail.ParseAddress(cfg.Email)
+	if err != nil {
 		return ErrBadEmail
 	}
+	cfg.Email = a.Address
 
 	if cfg.CronExpr == "" {
 		return ErrNoCron

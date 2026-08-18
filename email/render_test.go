@@ -137,8 +137,9 @@ func TestRenderDigest_TextOutputNoHTMLTags(t *testing.T) {
 
 func TestRenderDigest_TinyImagesStripped(t *testing.T) {
 	data := &DigestData{
-		ConfigName: "Test Config",
-		TotalItems: 1,
+		ConfigName:      "Test Config",
+		TotalItems:      1,
+		StripImageHosts: []string{"stickers.xeiaso.net"},
 		FeedGroups: []FeedGroup{
 			{
 				FeedName: "Test Feed",

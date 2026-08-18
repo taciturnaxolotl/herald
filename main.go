@@ -117,7 +117,7 @@ allow_all_keys: true
 #   - "ssh-ed25519 AAAA... user@host"
 `
 
-			if err := os.WriteFile(path, []byte(sampleConfig), 0600); err != nil {
+			if err := os.WriteFile(path, []byte(sampleConfig), 0o600); err != nil {
 				return fmt.Errorf("failed to write config file: %w", err)
 			}
 
@@ -203,7 +203,7 @@ func runPreview(ctx context.Context, feedURL, outputFile string, inline bool) er
 		return fmt.Errorf("gmail wrap: %w", err)
 	}
 
-	if err := os.WriteFile(outputFile, []byte(gmailOutput), 0600); err != nil {
+	if err := os.WriteFile(outputFile, []byte(gmailOutput), 0o600); err != nil {
 		return fmt.Errorf("write output: %w", err)
 	}
 	logger.Info("preview written", "file", outputFile, "items", len(items))
