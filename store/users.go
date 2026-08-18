@@ -6,8 +6,21 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
+
+// FingerprintSlug converts an OpenSSH fingerprint (e.g. "SHA256:xxxx") into a
+// URL-safe slug. Standard base64 uses +, /, and = padding, all of which cause
+// problems in URL paths: / creates extra path segments, = becomes %3D or =3D
+// in quoted-printable. The SHA256: prefix is preserved. The conversion is
+// deterministic and reversible.
+func FingerprintSlug(fp string) string {
+	s := strings.ReplaceAll(fp, "+", "-")
+	s = strings.ReplaceAll(s, "/", "_")
+	s = strings.TrimRight(s, "=")
+	return s
+}
 
 type User struct {
 	ID        int64

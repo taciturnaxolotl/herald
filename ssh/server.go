@@ -98,7 +98,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 }
 
 func (s *Server) publicKeyHandler(ctx ssh.Context, key ssh.PublicKey) bool {
-	fp := gossh.FingerprintSHA256(key)
+	fp := store.FingerprintSlug(gossh.FingerprintSHA256(key))
 	pubkeyStr := string(gossh.MarshalAuthorizedKey(key))
 
 	// Rate limit authentication attempts by fingerprint

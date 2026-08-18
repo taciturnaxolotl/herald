@@ -14,7 +14,7 @@ func (db *DB) CreateUnsubscribeToken(ctx context.Context, configID int64) (strin
 	if _, err := rand.Read(tokenBytes); err != nil {
 		return "", fmt.Errorf("generate token: %w", err)
 	}
-	token := base64.URLEncoding.EncodeToString(tokenBytes)
+	token := base64.RawURLEncoding.EncodeToString(tokenBytes)
 
 	_, err := db.ExecContext(ctx,
 		`INSERT INTO unsubscribe_tokens (token, config_id) VALUES (?, ?)`,

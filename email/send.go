@@ -161,32 +161,33 @@ func (m *Mailer) Send(to, subject, htmlBody, textBody, unsubToken, dashboardURL,
 	var textFooter strings.Builder
 
 	if keepAliveURL != "" || unsubToken != "" || dashboardURL != "" {
-		htmlFooter.WriteString(`<hr><p style="font-size: 12px; color: #666;">`)
+		// Each element on its own line so quoted-printable soft breaks land
+		// between tags, not mid-URL. A single 400-char line gets chopped at
+		// column 76 wherever that falls, which splits domains and schemes
+		// in a way that looks like obfuscation to content filters.
+		htmlFooter.WriteString("<hr>\n")
+		htmlFooter.WriteString(`<p style="font-size: 12px; color: #666;">` + "\n")
 		textFooter.WriteString("\n\n---\n")
 
+		var links []string
 		if keepAliveURL != "" {
-			fmt.Fprintf(&htmlFooter, `<a href="%s">keep this digest active</a>`, keepAliveURL)
+			links = append(links, fmt.Sprintf(`<a href="%s">keep this digest active</a>`, keepAliveURL))
 			fmt.Fprintf(&textFooter, "keep this digest active: %s\n", keepAliveURL)
 		}
 
 		if dashboardURL != "" {
-			if keepAliveURL != "" {
-				htmlFooter.WriteString(" • ")
-			}
-			fmt.Fprintf(&htmlFooter, `<a href="%s">profile</a>`, dashboardURL)
+			links = append(links, fmt.Sprintf(`<a href="%s">profile</a>`, dashboardURL))
 			fmt.Fprintf(&textFooter, "profile: %s\n", dashboardURL)
 		}
 
 		if unsubToken != "" {
 			unsubURL := m.unsubBaseURL + "/unsubscribe/" + unsubToken
-			if dashboardURL != "" || keepAliveURL != "" {
-				htmlFooter.WriteString(" • ")
-			}
-			fmt.Fprintf(&htmlFooter, `<a href="%s">unsubscribe</a>`, unsubURL)
+			links = append(links, fmt.Sprintf(`<a href="%s">unsubscribe</a>`, unsubURL))
 			fmt.Fprintf(&textFooter, "unsubscribe: %s\n", unsubURL)
 		}
 
-		htmlFooter.WriteString("</p>")
+		htmlFooter.WriteString(strings.Join(links, " &bull; \n"))
+		htmlFooter.WriteString("\n</p>")
 		htmlBody = injectHTMLFooter(htmlBody, htmlFooter.String())
 		textBody = textBody + textFooter.String()
 	}

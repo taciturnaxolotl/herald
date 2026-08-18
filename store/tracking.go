@@ -186,7 +186,7 @@ func (db *DB) GenerateTrackingToken() (string, error) {
 	if _, err := rand.Read(b); err != nil {
 		return "", err
 	}
-	return base64.URLEncoding.EncodeToString(b), nil
+	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
 func generateTrackingToken() (string, error) {
@@ -194,7 +194,7 @@ func generateTrackingToken() (string, error) {
 	if _, err := rand.Read(b); err != nil {
 		return "", err
 	}
-	return base64.URLEncoding.EncodeToString(b), nil
+	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
 // UpdateLastActive updates the last_active_at timestamp for a config by tracking token
