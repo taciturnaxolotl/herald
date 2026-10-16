@@ -52,18 +52,19 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 		return fmt.Errorf("failed to ensure host key: %w", err)
 	}
 
-	handler := &scpHandler{
+	up := &uploader{
 		store:       s.store,
 		scheduler:   s.scheduler,
 		logger:      s.logger,
 		rateLimiter: s.rateLimiter,
 	}
+	handler := &scpHandler{uploader: up}
 
 	srv, err := wish.NewServer(
 		wish.WithAddress(fmt.Sprintf("%s:%d", s.cfg.Host, s.cfg.Port)),
 		wish.WithHostKeyPath(s.cfg.HostKeyPath),
 		wish.WithPublicKeyAuth(s.publicKeyHandler),
-		wish.WithSubsystem("sftp", SFTPHandler(s.store, s.scheduler, s.logger, s.rateLimiter)),
+		wish.WithSubsystem("sftp", SFTPHandler(up)),
 		wish.WithMiddleware(
 			scp.Middleware(handler, handler),
 			s.commandMiddleware,
@@ -163,7 +164,7 @@ func (s *Server) commandMiddleware(next ssh.Handler) ssh.Handler {
 		// cryptic "unexpected end of file" the client gets when the server
 		// never speaks the rsync protocol.
 		if cmd[0] == "rsync" {
-			printf(sess.Stderr(), "herald: rsync is not supported. Upload with scp instead:\n  scp %s.txt %s:\n", "feeds", sess.User())
+			printf(sess.Stderr(), "herald: rsync is not supported. Upload with scp instead:\n  scp <file>.txt %s:\n", sess.User())
 			_ = sess.Exit(2)
 			return
 		}

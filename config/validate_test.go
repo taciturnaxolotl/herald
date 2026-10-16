@@ -2,6 +2,7 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 )
 
@@ -187,5 +188,15 @@ func TestValidate_CompleteConfig(t *testing.T) {
 	err := Validate(cfg)
 	if err != nil {
 		t.Errorf("complete valid config failed: %v", err)
+	}
+}
+
+func TestValidate_TooManyFeeds(t *testing.T) {
+	cfg := &ParsedConfig{Email: "a@b.com", CronExpr: "0 8 * * *"}
+	for i := 0; i <= MaxFeeds; i++ {
+		cfg.Feeds = append(cfg.Feeds, FeedEntry{URL: fmt.Sprintf("https://example.com/%d.xml", i)})
+	}
+	if err := Validate(cfg); err != ErrTooManyFeeds {
+		t.Errorf("expected ErrTooManyFeeds, got %v", err)
 	}
 }

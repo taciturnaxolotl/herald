@@ -2,7 +2,10 @@
 package scheduler
 
 import (
+	"cmp"
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"sync"
@@ -88,8 +91,12 @@ func FetchFeed(ctx context.Context, feed *store.Feed) *FetchResult {
 
 	parser := gofeed.NewParser()
 	parsedFeed, err := parser.Parse(io.LimitReader(resp.Body, safehttp.MaxBodyBytes))
+	if errors.Is(err, gofeed.ErrFeedTypeNotDetected) {
+		result.Error = fmt.Errorf("not an RSS, Atom or JSON feed (server sent %s)", cmp.Or(resp.Header.Get("Content-Type"), "no content type"))
+		return result
+	}
 	if err != nil {
-		result.Error = err
+		result.Error = fmt.Errorf("could not parse feed: %w", err)
 		return result
 	}
 
@@ -160,5 +167,5 @@ type httpError struct {
 }
 
 func (e *httpError) Error() string {
-	return http.StatusText(e.StatusCode)
+	return fmt.Sprintf("server returned %d %s", e.StatusCode, http.StatusText(e.StatusCode))
 }

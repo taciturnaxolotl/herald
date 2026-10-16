@@ -1,17 +1,13 @@
 package config
 
 import (
-	"context"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
 	"net/mail"
-	"time"
+	"strings"
 
 	"github.com/adhocore/gronx"
 	"github.com/kierank/herald/safehttp"
-	"github.com/mmcdole/gofeed"
 )
 
 var (
@@ -22,6 +18,11 @@ var (
 	ErrNoFeeds    = errors.New("at least one feed URL is required")
 	ErrBadFeedURL = errors.New("invalid feed URL")
 )
+
+// MaxFeeds caps feeds per config, since every upload fetches each one.
+const MaxFeeds = 200
+
+var ErrTooManyFeeds = fmt.Errorf("too many feeds (max %d per config)", MaxFeeds)
 
 func Validate(cfg *ParsedConfig) error {
 	if cfg.Email == "" {
@@ -45,51 +46,46 @@ func Validate(cfg *ParsedConfig) error {
 		return ErrNoFeeds
 	}
 
-	for _, feed := range cfg.Feeds {
-		if err := safehttp.ValidateURL(feed.URL); err != nil {
-			return fmt.Errorf("%w: %w", ErrBadFeedURL, err)
-		}
+	if len(cfg.Feeds) > MaxFeeds {
+		return ErrTooManyFeeds
 	}
 
+	var errs FeedErrors
+	for _, feed := range cfg.Feeds {
+		if err := safehttp.ValidateURL(feed.URL); err != nil {
+			errs = append(errs, FeedError{URL: feed.URL, Err: fmt.Errorf("%w: %w", ErrBadFeedURL, err)})
+		}
+	}
+	if errs != nil {
+		return errs
+	}
 	return nil
 }
 
-// ValidateFeedURLs attempts to fetch and parse each feed URL with a short timeout
-func ValidateFeedURLs(ctx context.Context, cfg *ParsedConfig) error {
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
+// FeedError records why a single feed URL could not be used.
+type FeedError struct {
+	URL string
+	Err error
+}
 
-	parser := gofeed.NewParser()
-	client := safehttp.Client(5 * time.Second)
+func (e FeedError) Error() string { return e.URL + ": " + e.Err.Error() }
+func (e FeedError) Unwrap() error { return e.Err }
 
-	for _, feed := range cfg.Feeds {
-		if err := safehttp.ValidateURL(feed.URL); err != nil {
-			return fmt.Errorf("invalid feed URL %s: %w", feed.URL, err)
-		}
+// FeedErrors lists every unusable feed in config order, so one upload reports them all.
+type FeedErrors []FeedError
 
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, feed.URL, nil)
-		if err != nil {
-			return fmt.Errorf("invalid feed URL %s: %w", feed.URL, err)
-		}
-
-		req.Header.Set("User-Agent", "Herald/1.0 (RSS Aggregator)")
-
-		resp, err := client.Do(req)
-		if err != nil {
-			return fmt.Errorf("failed to fetch feed %s: %w", feed.URL, err)
-		}
-
-		if resp.StatusCode != http.StatusOK {
-			_ = resp.Body.Close()
-			return fmt.Errorf("feed %s returned status %d", feed.URL, resp.StatusCode)
-		}
-
-		_, err = parser.Parse(io.LimitReader(resp.Body, safehttp.MaxBodyBytes))
-		_ = resp.Body.Close()
-		if err != nil {
-			return fmt.Errorf("failed to parse feed %s: %w", feed.URL, err)
-		}
+func (e FeedErrors) Unwrap() []error {
+	errs := make([]error, len(e))
+	for i, fe := range e {
+		errs[i] = fe
 	}
+	return errs
+}
 
-	return nil
+func (e FeedErrors) Error() string {
+	parts := make([]string, len(e))
+	for i, fe := range e {
+		parts[i] = fe.Error()
+	}
+	return fmt.Sprintf("%d feed(s) failed validation: %s", len(e), strings.Join(parts, "; "))
 }

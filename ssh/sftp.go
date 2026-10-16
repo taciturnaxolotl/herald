@@ -8,30 +8,20 @@ import (
 	"strings"
 	"time"
 
-	"charm.land/log/v2"
 	"charm.land/ssh"
-	"github.com/kierank/herald/ratelimit"
-	"github.com/kierank/herald/scheduler"
 	"github.com/kierank/herald/store"
 	"github.com/pkg/sftp"
 )
 
-func SFTPHandler(st *store.DB, sched *scheduler.Scheduler, logger *log.Logger, rateLimiter *ratelimit.Limiter) func(ssh.Session) {
+func SFTPHandler(up *uploader) func(ssh.Session) {
 	return func(s ssh.Session) {
 		user, ok := s.Context().Value("user").(*store.User)
 		if !ok {
-			logger.Error("SFTP: no user in context")
+			up.logger.Error("SFTP: no user in context")
 			return
 		}
 
-		handler := &sftpHandler{
-			store:       st,
-			scheduler:   sched,
-			logger:      logger,
-			user:        user,
-			session:     s,
-			rateLimiter: rateLimiter,
-		}
+		handler := &sftpHandler{uploader: up, user: user, session: s}
 
 		server := sftp.NewRequestServer(s, sftp.Handlers{
 			FileGet:  handler,
@@ -40,14 +30,11 @@ func SFTPHandler(st *store.DB, sched *scheduler.Scheduler, logger *log.Logger, r
 			FileList: handler,
 		})
 
-		// Send the SSH exit-status BEFORE closing the sftp server. Closing it
-		// tears down the ssh channel, and if that happens first the library
-		// cannot deliver exit-status -- which makes scp report a bogus exit -1
-		// even though the transfer fully succeeded.
+		// Exit before Close: closing tears down the channel, losing exit-status (scp shows -1).
 		err := server.Serve()
 		code := 0
 		if err != nil && !errors.Is(err, io.EOF) {
-			logger.Error("SFTP server error", "err", err)
+			up.logger.Error("SFTP server error", "err", err)
 			code = 1
 		}
 		_ = s.Exit(code)
@@ -56,12 +43,9 @@ func SFTPHandler(st *store.DB, sched *scheduler.Scheduler, logger *log.Logger, r
 }
 
 type sftpHandler struct {
-	store       *store.DB
-	scheduler   *scheduler.Scheduler
-	logger      *log.Logger
-	user        *store.User
-	session     ssh.Session
-	rateLimiter *ratelimit.Limiter
+	*uploader
+	user    *store.User
+	session ssh.Session
 }
 
 // Fileread for downloads
@@ -84,15 +68,6 @@ func (h *sftpHandler) Filewrite(r *sftp.Request) (io.WriterAt, error) {
 	filename := strings.TrimPrefix(r.Filepath, "/")
 	if filename == "" || filename == "." {
 		return nil, fmt.Errorf("invalid filename")
-	}
-
-	if !strings.HasSuffix(filename, ".txt") {
-		return nil, fmt.Errorf("only .txt files are supported")
-	}
-
-	// Rate limit uploads (per user), matching the scp path.
-	if h.rateLimiter != nil && !h.rateLimiter.Allow(fmt.Sprintf("upload:%d", h.user.ID)) {
-		return nil, fmt.Errorf("rate limit exceeded, please try again later")
 	}
 
 	h.logger.Debug("SFTP write", "filename", filename, "user_id", h.user.ID)
@@ -161,31 +136,26 @@ type configWriter struct {
 	buffer   []byte
 }
 
+// WriteAt keeps at most one byte past the cap, letting ingest reject oversize files with a readable error.
 func (w *configWriter) WriteAt(p []byte, off int64) (int, error) {
-	// Expand buffer if needed
-	needed := int(off) + len(p)
-	if needed > len(w.buffer) {
-		newBuf := make([]byte, needed)
-		copy(newBuf, w.buffer)
-		w.buffer = newBuf
+	const limit = maxUploadBytes + 1
+	if off < 0 {
+		return 0, fmt.Errorf("negative offset")
 	}
-	copy(w.buffer[off:], p)
+	if off >= limit {
+		return len(p), nil
+	}
+	kept := p[:min(int64(len(p)), limit-off)]
+	if needed := int(off) + len(kept); needed > len(w.buffer) {
+		w.buffer = append(w.buffer, make([]byte, needed-len(w.buffer))...)
+	}
+	copy(w.buffer[off:], kept)
 	return len(p), nil
 }
 
+// Close ingests the upload; OpenSSH shows a failed close only as "Failure", so upload also reports to stderr.
 func (w *configWriter) Close() error {
-	// Same ingest path as scp, so default scp (which uses sftp) enforces the
-	// identical validation, feed-URL checks and confirmed-opt-in gating.
-	return ingestConfig(
-		w.handler.session.Context(),
-		w.handler.store,
-		w.handler.scheduler,
-		w.handler.logger,
-		w.handler.user,
-		w.handler.session.RemoteAddr(),
-		w.filename,
-		string(w.buffer),
-	)
+	return w.handler.upload(w.handler.session, w.handler.user, w.filename, string(w.buffer))
 }
 
 type bytesReaderAt struct {

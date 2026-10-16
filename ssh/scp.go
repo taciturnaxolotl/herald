@@ -9,20 +9,14 @@ import (
 	"path/filepath"
 	"time"
 
-	"charm.land/log/v2"
 	"charm.land/ssh"
 	"charm.land/wish/v2/scp"
 	"github.com/adhocore/gronx"
-	"github.com/kierank/herald/ratelimit"
-	"github.com/kierank/herald/scheduler"
 	"github.com/kierank/herald/store"
 )
 
 type scpHandler struct {
-	store       *store.DB
-	scheduler   *scheduler.Scheduler
-	logger      *log.Logger
-	rateLimiter *ratelimit.Limiter
+	*uploader
 }
 
 func (h *scpHandler) Glob(s ssh.Session, pattern string) ([]string, error) {
@@ -107,21 +101,16 @@ func (h *scpHandler) Write(s ssh.Session, entry *scp.FileEntry) (int64, error) {
 		return 0, fmt.Errorf("no user in context")
 	}
 
-	// Rate limit uploads (per user)
-	if !h.rateLimiter.Allow(fmt.Sprintf("upload:%d", user.ID)) {
-		return 0, fmt.Errorf("rate limit exceeded, please try again later")
-	}
-
-	if entry.Size > maxUploadBytes {
-		return 0, fmt.Errorf("file too large (max 1MB)")
-	}
-
-	content, err := io.ReadAll(io.LimitReader(entry.Reader, maxUploadBytes))
+	// Read one byte past the cap so ingest's size check sees oversize files.
+	content, err := io.ReadAll(io.LimitReader(entry.Reader, maxUploadBytes+1))
 	if err != nil {
 		return 0, fmt.Errorf("failed to read file: %w", err)
 	}
 
-	if err := ingestConfig(s.Context(), h.store, h.scheduler, h.logger, user, s.RemoteAddr(), entry.Name, string(content)); err != nil {
+	if err := h.upload(s, user, entry.Name, string(content)); err != nil {
+		// Close first so the middleware's own unformatted copy of err is dropped.
+		_ = s.Exit(1)
+		_ = s.Close()
 		return 0, err
 	}
 	return int64(len(content)), nil
