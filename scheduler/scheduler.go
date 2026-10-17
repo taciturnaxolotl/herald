@@ -8,10 +8,10 @@ import (
 
 	"charm.land/log/v2"
 	"github.com/adhocore/gronx"
-	"github.com/kierank/herald/config"
-	"github.com/kierank/herald/email"
-	"github.com/kierank/herald/ratelimit"
-	"github.com/kierank/herald/store"
+	"github.com/taciturnaxolotl/herald/config"
+	"github.com/taciturnaxolotl/herald/email"
+	"github.com/taciturnaxolotl/herald/ratelimit"
+	"github.com/taciturnaxolotl/herald/store"
 )
 
 const (

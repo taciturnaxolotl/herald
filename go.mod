@@ -1,4 +1,4 @@
-module github.com/kierank/herald
+module github.com/taciturnaxolotl/herald
 
 go 1.25.12
 

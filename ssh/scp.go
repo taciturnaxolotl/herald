@@ -12,7 +12,7 @@ import (
 	"charm.land/ssh"
 	"charm.land/wish/v2/scp"
 	"github.com/adhocore/gronx"
-	"github.com/kierank/herald/store"
+	"github.com/taciturnaxolotl/herald/store"
 )
 
 type scpHandler struct {

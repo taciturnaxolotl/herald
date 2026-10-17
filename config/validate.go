@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/adhocore/gronx"
-	"github.com/kierank/herald/safehttp"
+	"github.com/taciturnaxolotl/herald/safehttp"
 )
 
 var (

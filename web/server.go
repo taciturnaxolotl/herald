@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"charm.land/log/v2"
-	"github.com/kierank/herald/ratelimit"
-	"github.com/kierank/herald/store"
+	"github.com/taciturnaxolotl/herald/ratelimit"
+	"github.com/taciturnaxolotl/herald/store"
 )
 
 //go:embed templates/*

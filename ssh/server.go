@@ -15,9 +15,9 @@ import (
 	"charm.land/ssh"
 	"charm.land/wish/v2"
 	"charm.land/wish/v2/scp"
-	"github.com/kierank/herald/ratelimit"
-	"github.com/kierank/herald/scheduler"
-	"github.com/kierank/herald/store"
+	"github.com/taciturnaxolotl/herald/ratelimit"
+	"github.com/taciturnaxolotl/herald/scheduler"
+	"github.com/taciturnaxolotl/herald/store"
 	gossh "golang.org/x/crypto/ssh"
 )
 

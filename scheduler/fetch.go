@@ -12,9 +12,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/kierank/herald/safehttp"
-	"github.com/kierank/herald/store"
 	"github.com/mmcdole/gofeed"
+	"github.com/taciturnaxolotl/herald/safehttp"
+	"github.com/taciturnaxolotl/herald/store"
 )
 
 const (

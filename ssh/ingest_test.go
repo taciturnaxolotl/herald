@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kierank/herald/config"
+	"github.com/taciturnaxolotl/herald/config"
 )
 
 func TestFormatUploadError_ListsEveryFeed(t *testing.T) {

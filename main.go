@@ -10,13 +10,13 @@ import (
 
 	"charm.land/log/v2"
 	"github.com/charmbracelet/fang"
-	"github.com/kierank/herald/config"
-	"github.com/kierank/herald/email"
-	"github.com/kierank/herald/scheduler"
-	"github.com/kierank/herald/ssh"
-	"github.com/kierank/herald/store"
-	"github.com/kierank/herald/web"
 	"github.com/spf13/cobra"
+	"github.com/taciturnaxolotl/herald/config"
+	"github.com/taciturnaxolotl/herald/email"
+	"github.com/taciturnaxolotl/herald/scheduler"
+	"github.com/taciturnaxolotl/herald/ssh"
+	"github.com/taciturnaxolotl/herald/store"
+	"github.com/taciturnaxolotl/herald/web"
 	"golang.org/x/sync/errgroup"
 )
 

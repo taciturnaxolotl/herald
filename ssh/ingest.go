@@ -12,10 +12,10 @@ import (
 	"charm.land/log/v2"
 	"charm.land/ssh"
 
-	"github.com/kierank/herald/config"
-	"github.com/kierank/herald/ratelimit"
-	"github.com/kierank/herald/scheduler"
-	"github.com/kierank/herald/store"
+	"github.com/taciturnaxolotl/herald/config"
+	"github.com/taciturnaxolotl/herald/ratelimit"
+	"github.com/taciturnaxolotl/herald/scheduler"
+	"github.com/taciturnaxolotl/herald/store"
 )
 
 const maxUploadBytes = 1024 * 1024 // 1 MiB

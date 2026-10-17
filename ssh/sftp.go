@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"charm.land/ssh"
-	"github.com/kierank/herald/store"
 	"github.com/pkg/sftp"
+	"github.com/taciturnaxolotl/herald/store"
 )
 
 func SFTPHandler(up *uploader) func(ssh.Session) {
