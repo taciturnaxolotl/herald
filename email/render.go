@@ -56,7 +56,7 @@ type templateFeedGroup struct {
 }
 
 // emailUnsafeTags are HTML5 semantic tags not supported by most email clients (Gmail, Outlook, etc.)
-var emailUnsafeTags = regexp.MustCompile(`</?(?:article|section|nav|header|footer|aside|main|figure|figcaption|details|summary|mark|time|dialog)(?:\s[^>]*)?>`)
+var emailUnsafeTags = regexp.MustCompile(`</?(?:article|section|nav|header|footer|aside|main|figure|figcaption|mark|time|dialog)(?:\s[^>]*)?>`)
 
 // tinyImageTags matches <img> tags with small fixed dimensions (e.g., character stickers, decorative avatars).
 // The class-based patterns cover Tailwind h-8 (32px), h-12 (48px), h-16 (64px) sizing.
@@ -65,6 +65,14 @@ var (
 	tinyImageTags    = regexp.MustCompile(`<img[^>]*\sclass="[^"]*\bh-(?:8|12|16)\b[^"]*"[^>]*\/?>`)
 	tinyInlineImages = regexp.MustCompile(`<img[^>]*\s(?:width|height)="(?:\d|[1-5]\d|6[0-4])"[^>]*\/?>`)
 )
+
+// detailsBlocks flattens <details>/<summary>, which Gmail and Outlook can't collapse, into a labelled aside.
+var detailsBlocks = strings.NewReplacer(
+	"<details>", detailsOpen, `<details open="">`, detailsOpen, "</details>", "</div>",
+	"<summary>", `<p style="font-weight:bold;margin:0 0 6px">`, "</summary>", "</p>",
+)
+
+const detailsOpen = `<div style="border-left:3px solid #ccc;padding-left:12px;margin:1em 0">`
 
 // spanTags matches span tags (used to strip syntax highlighting noise from code blocks)
 var spanTags = regexp.MustCompile(`</?span(?:\s[^>]*)?>`)
@@ -86,6 +94,7 @@ func sanitizeHTML(htmlStr string, base *url.URL, stripHosts []string) string {
 	sanitized = resolveRelativeURLs(sanitized, base)
 	// Strip HTML5 semantic tags that email clients don't support
 	sanitized = emailUnsafeTags.ReplaceAllString(sanitized, "")
+	sanitized = detailsBlocks.Replace(sanitized)
 	// Strip tiny decorative images (character stickers, small avatars) that don't render well in email
 	sanitized = tinyImageTags.ReplaceAllString(sanitized, "")
 	for _, host := range stripHosts {

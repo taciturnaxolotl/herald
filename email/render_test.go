@@ -276,3 +276,17 @@ func TestEntryURL(t *testing.T) {
 		}
 	}
 }
+
+func TestSanitizeHTML_DetailsBecomeLabelledBlock(t *testing.T) {
+	out := sanitizeHTML(`<p>a</p><details open class="x"><summary>Hint one</summary><p>secret</p></details>`, nil, nil)
+
+	if strings.Contains(out, "<details") || strings.Contains(out, "<summary") {
+		t.Errorf("details/summary should be flattened: %s", out)
+	}
+	if !strings.Contains(out, `<p style="font-weight:bold;margin:0 0 6px">Hint one</p>`) {
+		t.Errorf("summary should become a bold label: %s", out)
+	}
+	if !strings.Contains(out, detailsOpen+`<p style="font-weight:bold;margin:0 0 6px">Hint one</p><p>secret</p></div>`) {
+		t.Errorf("details body should be wrapped in an aside: %s", out)
+	}
+}
