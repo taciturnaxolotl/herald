@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"html"
 	htmltemplate "html/template"
+	"net/url"
 	"regexp"
 	"strings"
 	texttemplate "text/template"
@@ -79,8 +80,10 @@ const codeBlockStyle = `<pre style="background-color:#f5f5f5;padding:12px;border
 
 // sanitizeHTML sanitizes HTML content, allowing safe tags while stripping styles and unsafe elements.
 // stripHosts lists image source hosts whose <img> tags should be removed.
-func sanitizeHTML(htmlStr string, stripHosts []string) string {
+// base resolves relative src/href values, which email clients cannot.
+func sanitizeHTML(htmlStr string, base *url.URL, stripHosts []string) string {
 	sanitized := policy.Sanitize(htmlStr)
+	sanitized = resolveRelativeURLs(sanitized, base)
 	// Strip HTML5 semantic tags that email clients don't support
 	sanitized = emailUnsafeTags.ReplaceAllString(sanitized, "")
 	// Strip tiny decorative images (character stickers, small avatars) that don't render well in email
@@ -98,6 +101,27 @@ func sanitizeHTML(htmlStr string, stripHosts []string) string {
 	// Add styling to pre tags for better code block appearance
 	sanitized = preTagOpen.ReplaceAllString(sanitized, codeBlockStyle)
 	return sanitized
+}
+
+// urlAttr matches src/href in bluemonday output, which always double-quotes values.
+var urlAttr = regexp.MustCompile(`(\s(?:src|href)=")([^"]*)(")`)
+
+func resolveRelativeURLs(htmlStr string, base *url.URL) string {
+	if base == nil || !base.IsAbs() {
+		return htmlStr
+	}
+	return urlAttr.ReplaceAllStringFunc(htmlStr, func(match string) string {
+		m := urlAttr.FindStringSubmatch(match)
+		raw := html.UnescapeString(m[2])
+		if raw == "" || strings.HasPrefix(raw, "#") {
+			return match
+		}
+		ref, err := url.Parse(raw)
+		if err != nil || ref.IsAbs() {
+			return match
+		}
+		return m[1] + html.EscapeString(base.ResolveReference(ref).String()) + m[3]
+	})
 }
 
 // dedentPreBlock removes common leading whitespace from lines inside a <pre> block.
@@ -229,6 +253,19 @@ func init() {
 	policy = bluemonday.UGCPolicy()
 }
 
+// entryURL resolves an entry link against its feed, so empty or relative links fall back sensibly.
+func entryURL(feedURL, link string) *url.URL {
+	feed, err := url.Parse(feedURL)
+	if err != nil {
+		return nil
+	}
+	ref, err := url.Parse(link)
+	if err != nil {
+		return feed
+	}
+	return feed.ResolveReference(ref)
+}
+
 // DigestSubject names the source and counts the entries. A subject that varies
 // per send reads as real list mail; a constant one reads as a blast.
 func DigestSubject(data *DigestData) string {
@@ -258,7 +295,7 @@ func RenderDigest(data *DigestData, inline bool, daysUntilExpiry int, showUrgent
 				Link:             item.Link,
 				Content:          item.Content,
 				PlainContent:     stripHTML(item.Content),
-				SanitizedContent: htmltemplate.HTML(sanitizeHTML(item.Content, data.StripImageHosts)), // #nosec G203 -- Content is sanitized by bluemonday before conversion
+				SanitizedContent: htmltemplate.HTML(sanitizeHTML(item.Content, entryURL(group.FeedURL, item.Link), data.StripImageHosts)), // #nosec G203 -- Content is sanitized by bluemonday before conversion
 				Published:        item.Published,
 			}
 		}

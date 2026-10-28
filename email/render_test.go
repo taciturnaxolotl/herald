@@ -248,3 +248,31 @@ func TestInjectHTMLFooter(t *testing.T) {
 		t.Errorf("fragment append = %q", got)
 	}
 }
+
+func TestSanitizeHTML_ResolvesRelativeURLs(t *testing.T) {
+	in := `<img src="/images/a.avif" alt="a"/><img src="https://cdn.example.com/b.png"/><a href="../other/?x=1&y=2">o</a><a href="#top">t</a>`
+	out := sanitizeHTML(in, entryURL("https://dbushell.com/rss.xml", "https://dbushell.com/2026/10/28/danse-macabre/"), nil)
+
+	for _, want := range []string{
+		`src="https://dbushell.com/images/a.avif"`,
+		`src="https://cdn.example.com/b.png"`,
+		`href="https://dbushell.com/2026/10/28/other/?x=1&amp;y=2"`,
+		`href="#top"`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %s in %s", want, out)
+		}
+	}
+}
+
+func TestEntryURL(t *testing.T) {
+	for link, want := range map[string]string{
+		"":                        "https://example.com/blog/feed.xml",
+		"post/1":                  "https://example.com/blog/post/1",
+		"https://other.example/x": "https://other.example/x",
+	} {
+		if got := entryURL("https://example.com/blog/feed.xml", link).String(); got != want {
+			t.Errorf("entryURL(%q) = %q, want %q", link, got, want)
+		}
+	}
+}
