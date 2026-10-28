@@ -290,3 +290,37 @@ func TestSanitizeHTML_DetailsBecomeLabelledBlock(t *testing.T) {
 		t.Errorf("details body should be wrapped in an aside: %s", out)
 	}
 }
+
+func TestStripHTML_PreservesBlockStructure(t *testing.T) {
+	in := `<p>First
+  para.</p><p>Second<br>line</p><details><summary>Hint one</summary><p>secret</p></details>` +
+		`<ol><li>alpha</li><li>beta</li></ol><ul><li>x</li><li>y</li></ul><pre>if x:
+    y()</pre><p>end</p>`
+	want := "First para.\n\nSecond\nline\n\nHint one\n\nsecret\n\n1. alpha\n2. beta\n\n- x\n- y\n\n    if x:\n        y()\n\nend"
+
+	if got := stripHTML(in); got != want {
+		t.Errorf("stripHTML:\ngot:\n%s\n\nwant:\n%s", got, want)
+	}
+}
+
+func TestDedentPreBlock(t *testing.T) {
+	cases := map[string]struct{ in, want string }{
+		"pretty-printed indent is removed": {
+			"<div>\n    <pre>for x:\n        y()\n    done</pre>",
+			"<div>\n    <pre>for x:\n    y()\ndone</pre>",
+		},
+		"inline pre keeps its indentation": {
+			"<p>a</p><pre>sleep 4 && \\\n  ip link up</pre>",
+			"<p>a</p><pre>sleep 4 && \\\n  ip link up</pre>",
+		},
+		"unindented pre on its own line is untouched": {
+			"\n<pre>if x:\n    y()</pre>",
+			"\n<pre>if x:\n    y()</pre>",
+		},
+	}
+	for name, c := range cases {
+		if got := preBlockFull.ReplaceAllStringFunc(c.in, dedentPreBlock); got != c.want {
+			t.Errorf("%s:\ngot  %q\nwant %q", name, got, c.want)
+		}
+	}
+}

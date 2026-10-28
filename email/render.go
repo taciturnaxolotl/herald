@@ -77,8 +77,8 @@ const detailsOpen = `<div style="border-left:3px solid #ccc;padding-left:12px;ma
 // spanTags matches span tags (used to strip syntax highlighting noise from code blocks)
 var spanTags = regexp.MustCompile(`</?span(?:\s[^>]*)?>`)
 
-// preBlockFull matches entire <pre>...</pre> blocks for whitespace normalization
-var preBlockFull = regexp.MustCompile(`(?s)(<pre[^>]*>)(.*?)(</pre>)`)
+// preBlockFull matches <pre>...</pre>, capturing any indentation before the tag on its own line.
+var preBlockFull = regexp.MustCompile(`(?s)(\n([ \t]*))?(<pre[^>]*>)(.*?)(</pre>)`)
 
 // preTagOpen matches opening pre tags to add styling
 var preTagOpen = regexp.MustCompile(`<pre(?:\s[^>]*)?>`)
@@ -104,8 +104,6 @@ func sanitizeHTML(htmlStr string, base *url.URL, stripHosts []string) string {
 	sanitized = tinyInlineImages.ReplaceAllString(sanitized, "")
 	// Strip span tags (removes syntax highlighting noise from code blocks)
 	sanitized = spanTags.ReplaceAllString(sanitized, "")
-	// Dedent pre blocks: RSS XML indentation leaks into <pre> content after
-	// span stripping, causing misaligned ASCII art and code
 	sanitized = preBlockFull.ReplaceAllStringFunc(sanitized, dedentPreBlock)
 	// Add styling to pre tags for better code block appearance
 	sanitized = preTagOpen.ReplaceAllString(sanitized, codeBlockStyle)
@@ -133,109 +131,74 @@ func resolveRelativeURLs(htmlStr string, base *url.URL) string {
 	})
 }
 
-// dedentPreBlock removes common leading whitespace from lines inside a <pre> block.
-// RSS feeds often indent <pre> content with XML indentation that becomes visible
-// after span tags are stripped, breaking ASCII art alignment.
+// dedentPreBlock removes the indent a pretty-printed <pre> tag leaks into its later lines, and nothing more.
 func dedentPreBlock(block string) string {
 	m := preBlockFull.FindStringSubmatch(block)
-	if len(m) < 4 {
+	lead, indent, openTag, inner, closeTag := m[1], m[2], m[3], m[4], m[5]
+	if indent == "" {
 		return block
 	}
-	openTag, inner, closeTag := m[1], m[2], m[3]
 
 	lines := strings.Split(inner, "\n")
-	if len(lines) <= 1 {
-		return block
+	for i := 1; i < len(lines); i++ {
+		lines[i] = strings.TrimPrefix(lines[i], indent)
 	}
-
-	// Find the minimum leading whitespace across non-empty lines (skip first
-	// line since it's right after the opening tag and usually has no indent)
-	minIndent := -1
-	for i, line := range lines {
-		if i == 0 || strings.TrimSpace(line) == "" {
-			continue
-		}
-		trimmed := strings.TrimLeft(line, " \t")
-		indent := len(line) - len(trimmed)
-		if minIndent < 0 || indent < minIndent {
-			minIndent = indent
-		}
-	}
-
-	if minIndent <= 0 {
-		return block
-	}
-
-	// Strip the common indent from each line
-	for i, line := range lines {
-		if i == 0 || len(line) == 0 {
-			continue
-		}
-		if len(line) >= minIndent {
-			lines[i] = line[minIndent:]
-		}
-	}
-
-	return openTag + strings.Join(lines, "\n") + closeTag
+	return lead + openTag + strings.Join(lines, "\n") + closeTag
 }
 
-// htmlTagRegex matches HTML tags for stripping
-var htmlTagRegex = regexp.MustCompile(`<[^>]*>`)
+// Plain-text layout: source whitespace is collapsed, then structure comes back from block tags.
+var (
+	htmlTagRegex       = regexp.MustCompile(`<[^>]*>`)
+	anyWhitespace      = regexp.MustCompile(`\s+`)
+	horizontalSpace    = regexp.MustCompile(`[ \t]+`)
+	spaceAroundNewline = regexp.MustCompile(` *\n *`)
+	multipleNewlines   = regexp.MustCompile(`\n{3,}`)
+	blockTags          = regexp.MustCompile(`(?i)</?(?:p|div|h[1-6]|blockquote|ul|ol|table|tr|details|summary|hr)(?:\s[^>]*)?/?>`)
+	lineBreakTags      = regexp.MustCompile(`(?i)<br\s*/?>`)
+	listItemTag        = regexp.MustCompile(`(?i)<li(?:\s[^>]*)?>`)
+	orderedLists       = regexp.MustCompile(`(?is)<ol(?:\s[^>]*)?>.*?</ol>`)
+)
 
-// preBlockRegex matches pre blocks including content
-var preBlockRegex = regexp.MustCompile(`(?s)<pre[^>]*>(.*?)</pre>`)
-
-// whitespaceCollapse collapses multiple whitespace chars
-var whitespaceCollapse = regexp.MustCompile(`[ \t]+`)
-
-// multipleNewlines collapses 3+ newlines to 2
-var multipleNewlines = regexp.MustCompile(`\n{3,}`)
-
-// decodeEntities decodes HTML entities using the stdlib, which handles the
-// full set (named, numeric, hex) without double-decoding.
-func decodeEntities(text string) string {
-	return html.UnescapeString(text)
+// numberListItems replaces each <li> in an ordered list with its number.
+func numberListItems(list string) string {
+	n := 0
+	return listItemTag.ReplaceAllStringFunc(list, func(string) string {
+		n++
+		return fmt.Sprintf("\n%d. ", n)
+	})
 }
 
-// stripHTML removes all HTML tags and decodes entities for plain text output
-func stripHTML(html string) string {
-	// First sanitize to ensure we're working with clean HTML
-	sanitized := policy.Sanitize(html)
+// stripHTML renders feed HTML as plain text, keeping paragraphs, lists and code blocks.
+func stripHTML(htmlStr string) string {
+	sanitized := policy.Sanitize(htmlStr)
 
-	// Extract code blocks and replace with placeholders
+	// Code blocks are set aside so whitespace collapsing can't touch them.
 	var codeBlocks []string
-	sanitized = preBlockRegex.ReplaceAllStringFunc(sanitized, func(match string) string {
-		inner := preBlockRegex.FindStringSubmatch(match)
-		if len(inner) < 2 {
-			return match
-		}
-		code := inner[1]
-		// Strip any remaining tags (like spans for syntax highlighting)
-		code = htmlTagRegex.ReplaceAllString(code, "")
-		code = decodeEntities(code)
-		// Indent each line with 4 spaces
+	sanitized = preBlockFull.ReplaceAllStringFunc(sanitized, func(block string) string {
+		code := preBlockFull.FindStringSubmatch(dedentPreBlock(block))[4]
+		code = html.UnescapeString(htmlTagRegex.ReplaceAllString(code, ""))
 		lines := strings.Split(strings.TrimSpace(code), "\n")
 		for i, line := range lines {
 			lines[i] = "    " + line
 		}
 		codeBlocks = append(codeBlocks, strings.Join(lines, "\n"))
-		return fmt.Sprintf("\n\n__CODEBLOCK_%d__\n\n", len(codeBlocks)-1)
+		return fmt.Sprintf("<p>__CODEBLOCK_%d__</p>", len(codeBlocks)-1)
 	})
 
-	// Strip all remaining HTML tags
-	text := htmlTagRegex.ReplaceAllString(sanitized, "")
-	// Decode entities
-	text = decodeEntities(text)
-	// Collapse horizontal whitespace (but preserve newlines for structure)
-	text = whitespaceCollapse.ReplaceAllString(text, " ")
-	// Collapse excessive newlines
+	sanitized = anyWhitespace.ReplaceAllString(sanitized, " ")
+	sanitized = orderedLists.ReplaceAllStringFunc(sanitized, numberListItems)
+	sanitized = listItemTag.ReplaceAllString(sanitized, "\n- ")
+	sanitized = lineBreakTags.ReplaceAllString(sanitized, "\n")
+	sanitized = blockTags.ReplaceAllString(sanitized, "\n\n")
+
+	text := html.UnescapeString(htmlTagRegex.ReplaceAllString(sanitized, ""))
+	text = horizontalSpace.ReplaceAllString(text, " ")
+	text = spaceAroundNewline.ReplaceAllString(text, "\n")
 	text = multipleNewlines.ReplaceAllString(text, "\n\n")
 
-	// Restore code blocks
 	for i, block := range codeBlocks {
 		text = strings.ReplaceAll(text, fmt.Sprintf("__CODEBLOCK_%d__", i), block)
 	}
-
 	return strings.TrimSpace(text)
 }
 
