@@ -3,14 +3,26 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>HERALD - Digest Active</title>
+    <title>HERALD - Keep Digest Active</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="/style.css">
 </head>
 <body>
 <h1>HERALD</h1>
-<h2>SUCCESS</h2>
-<p>Your digest will stay active until <strong>{{.ExpiresAt}}</strong>.</p>
+
+{{if .Success}}
+    <h2>SUCCESS</h2>
+    <p>Your digest will stay active until <strong>{{.ExpiresAt}}</strong>.</p>
+{{else}}
+    <h2>KEEP DIGEST ACTIVE</h2>
+    <p><strong>DIGEST:</strong> {{.Filename}}</p>
+    <p>Keep this digest active until <strong>{{.ExpiresAt}}</strong>?</p>
+
+    <form method="POST">
+        <button type="submit">Keep this digest active</button>
+    </form>
+{{end}}
+
 <footer>
     <span><a href="/">Return to home</a></span>
 </footer>

@@ -694,28 +694,44 @@ func parseOriginHost(origin string) string {
 }
 
 type keepAlivePageData struct {
+	Filename  string
 	ExpiresAt string
+	Success   bool
 }
 
+// handleKeepAlive shows a confirm button on GET and renews only on POST, so
+// mail scanners that prefetch links cannot keep every digest alive.
 func (s *Server) handleKeepAlive(w http.ResponseWriter, r *http.Request, token string) {
-	// Only allow GET requests
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+	ctx := r.Context()
+
+	cfg, err := s.store.GetConfigByTrackingToken(ctx, token)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			s.handle404WithMessage(w, r, "Invalid Link", "This keep-alive link is invalid.")
+			return
+		}
+		s.logger.Error("get config by tracking token", "err", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
-
-	// Update last_active_at for this config
-	if err := s.store.UpdateLastActive(token); err != nil {
-		s.logger.Debug("keep-alive error", "token", token, "err", err)
-		http.Error(w, "Invalid or expired link", http.StatusNotFound)
-		return
-	}
-
-	// Calculate new expiry date (90 days from now)
-	expiresAt := time.Now().AddDate(0, 0, 90).Format("January 2, 2006")
 
 	data := keepAlivePageData{
-		ExpiresAt: expiresAt,
+		Filename:  cfg.Filename,
+		ExpiresAt: time.Now().AddDate(0, 0, 90).Format("January 2, 2006"),
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+	case http.MethodPost:
+		if err := s.store.UpdateLastActive(ctx, token); err != nil {
+			s.logger.Error("keep-alive", "err", err)
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+		data.Success = true
+	default:
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
 	}
 
 	if err := s.tmpl.ExecuteTemplate(w, "keepalive.html", data); err != nil {

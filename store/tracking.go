@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"crypto/rand"
 	"database/sql"
 	"encoding/base64"
@@ -197,14 +198,26 @@ func generateTrackingToken() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
+// GetConfigByTrackingToken returns the config a digest's keep-alive token belongs to.
+func (db *DB) GetConfigByTrackingToken(ctx context.Context, trackingToken string) (*Config, error) {
+	var configID int64
+	err := db.QueryRowContext(ctx,
+		`SELECT config_id FROM email_sends WHERE tracking_token = ? LIMIT 1`, trackingToken,
+	).Scan(&configID)
+	if err != nil {
+		return nil, err
+	}
+	return db.GetConfigByID(ctx, configID)
+}
+
 // UpdateLastActive updates the last_active_at timestamp for a config by tracking token
-func (db *DB) UpdateLastActive(trackingToken string) error {
+func (db *DB) UpdateLastActive(ctx context.Context, trackingToken string) error {
 	query := `UPDATE configs
 	          SET last_active_at = CURRENT_TIMESTAMP
 	          WHERE id = (
 	              SELECT config_id FROM email_sends WHERE tracking_token = ? LIMIT 1
 	          )`
-	result, err := db.Exec(query, trackingToken)
+	result, err := db.ExecContext(ctx, query, trackingToken)
 	if err != nil {
 		return fmt.Errorf("update last active: %w", err)
 	}
