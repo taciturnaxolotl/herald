@@ -388,7 +388,10 @@ func TestOpenUpgradesOldConfigsTable(t *testing.T) {
 		next_run DATETIME,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		UNIQUE(user_id, filename)
-	);`)
+	);
+	INSERT INTO users (id, pubkey_fp, pubkey) VALUES (1, 'legacy', 'key');
+	INSERT INTO configs (id, user_id, filename, email, cron_expr, raw_text, next_run)
+		VALUES (5, 1, 'old.txt', 'old@example.com', '0 8 * * *', '=: strip_image_hosts ads.example', '2026-01-01 08:00:00.25-05:00');`)
 	_ = raw.Close()
 	if err != nil {
 		t.Fatal(err)
@@ -401,6 +404,17 @@ func TestOpenUpgradesOldConfigsTable(t *testing.T) {
 	defer func() { _ = db.Close() }()
 
 	ctx := context.Background()
+	old, err := db.GetConfigByID(ctx, 5)
+	if err != nil {
+		t.Fatalf("legacy config unreadable after upgrade: %v", err)
+	}
+	if !old.NextRun.Time.Equal(time.Date(2026, 1, 1, 13, 0, 0, 25e7, time.UTC)) || len(old.StripImageHosts) != 1 {
+		t.Errorf("legacy config not migrated: next_run %v, hosts %v", old.NextRun.Time, old.StripImageHosts)
+	}
+	if ok, _ := db.IsEmailVerified(ctx, 1, "old@example.com"); !ok {
+		t.Error("legacy subscription should be confirmed")
+	}
+
 	user, _ := db.GetOrCreateUser(ctx, "fp", "key")
 	if _, err := db.CreateConfig(ctx, user.ID, "a.txt", "a@example.com", "0 8 * * *", false, "raw", time.Now()); err != nil {
 		t.Fatalf("CreateConfig after upgrade failed: %v", err)
