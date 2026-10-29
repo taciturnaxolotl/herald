@@ -23,6 +23,42 @@ type DigestData struct {
 	TotalItems      int
 	FeedGroups      []FeedGroup
 	StripImageHosts []string
+	Links           DigestLinks
+}
+
+// DigestLinks are the per-recipient links in a digest's footer and headers.
+type DigestLinks struct {
+	KeepAlive   string
+	Dashboard   string
+	Unsubscribe string
+}
+
+type footerLink struct{ Label, URL string }
+
+func (l DigestLinks) footer() []footerLink {
+	var links []footerLink
+	for _, link := range []footerLink{
+		{"keep this digest active", l.KeepAlive},
+		{"profile", l.Dashboard},
+		{"unsubscribe", l.Unsubscribe},
+	} {
+		if link.URL != "" {
+			links = append(links, link)
+		}
+	}
+	return links
+}
+
+// expiresIn phrases the days left for the expiry banner.
+func expiresIn(days int) string {
+	switch {
+	case days <= 0:
+		return "today"
+	case days == 1:
+		return "in 1 day"
+	default:
+		return fmt.Sprintf("in %d days", days)
+	}
 }
 
 type FeedGroup struct {
@@ -269,18 +305,22 @@ func RenderDigest(data *DigestData, inline bool, daysUntilExpiry int) (html stri
 		groups[i] = templateFeedGroup{FeedName: group.FeedName, FeedURL: group.FeedURL, Items: items}
 	}
 
+	// The banner points at the keep-alive link, so it only shows when there is one.
+	canRenew := data.Links.KeepAlive != ""
 	tmplData := struct {
 		FeedGroups        []templateFeedGroup
 		Inline            bool
-		DaysUntilExpiry   int
+		ExpiresIn         string
 		ShowUrgentBanner  bool
 		ShowWarningBanner bool
+		FooterLinks       []footerLink
 	}{
 		FeedGroups:        groups,
 		Inline:            inline,
-		DaysUntilExpiry:   daysUntilExpiry,
-		ShowUrgentBanner:  daysUntilExpiry >= 0 && daysUntilExpiry <= 7,
-		ShowWarningBanner: daysUntilExpiry > 7 && daysUntilExpiry <= 30,
+		ExpiresIn:         expiresIn(daysUntilExpiry),
+		ShowUrgentBanner:  canRenew && daysUntilExpiry >= 0 && daysUntilExpiry <= 7,
+		ShowWarningBanner: canRenew && daysUntilExpiry > 7 && daysUntilExpiry <= 30,
+		FooterLinks:       data.Links.footer(),
 	}
 
 	var htmlBuf, textBuf bytes.Buffer

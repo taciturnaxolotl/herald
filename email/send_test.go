@@ -25,7 +25,7 @@ func TestValidateConfigGivesUpOnSilentServer(t *testing.T) {
 
 	_, port, _ := net.SplitHostPort(ln.Addr().String())
 	p, _ := strconv.Atoi(port)
-	m, err := NewMailer(SMTPConfig{Host: "127.0.0.1", Port: p, From: "herald@example.com"}, "https://herald.test")
+	m, err := NewMailer(SMTPConfig{Host: "127.0.0.1", Port: p, From: "herald@example.com"})
 	if err != nil {
 		t.Fatal(err)
 	}

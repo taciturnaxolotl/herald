@@ -189,7 +189,7 @@ func runServer(ctx context.Context) error {
 	}
 	defer func() { _ = db.Close() }()
 
-	mailer, err := email.NewMailer(email.SMTPConfig(cfg.SMTP), cfg.Origin)
+	mailer, err := email.NewMailer(email.SMTPConfig(cfg.SMTP))
 	if err != nil {
 		return fmt.Errorf("failed to create mailer: %w", err)
 	}

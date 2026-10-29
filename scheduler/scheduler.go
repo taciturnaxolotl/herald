@@ -47,7 +47,7 @@ type RunStats struct {
 
 // Mailer delivers digests.
 type Mailer interface {
-	Send(to, subject, htmlBody, textBody, unsubToken, dashboardURL, keepAliveURL string) error
+	Send(to, subject, htmlBody, textBody string, links email.DigestLinks) error
 }
 
 type Scheduler struct {
@@ -343,13 +343,6 @@ func (s *Scheduler) sendDigest(ctx context.Context, cfg *store.Config, batch dig
 	}
 	inline := cfg.InlineContent && total <= maxInlineItems
 
-	daysUntilExpiry := int(time.Until(cfg.ExpiresAt()).Hours() / 24)
-
-	htmlBody, textBody, err := email.RenderDigest(digestData, inline, daysUntilExpiry)
-	if err != nil {
-		return fmt.Errorf("render digest: %w", err)
-	}
-
 	// Every digest must carry a working unsubscribe link, so no token means no send.
 	unsubToken, err := s.store.GetOrCreateUnsubscribeToken(ctx, cfg.ID)
 	if err != nil {
@@ -359,12 +352,20 @@ func (s *Scheduler) sendDigest(ctx context.Context, cfg *store.Config, batch dig
 	if err != nil {
 		return fmt.Errorf("create keep-alive token: %w", err)
 	}
-
-	dashboardURL := ""
+	digestData.Links = email.DigestLinks{
+		KeepAlive:   s.originURL + "/keep-alive/" + trackingToken,
+		Unsubscribe: s.originURL + "/unsubscribe/" + unsubToken,
+	}
 	if user, err := s.store.GetUserByID(ctx, cfg.UserID); err == nil {
-		dashboardURL = s.originURL + "/" + user.PubkeyFP
+		digestData.Links.Dashboard = s.originURL + "/" + user.PubkeyFP
 	} else {
 		s.logger.Warn("failed to get user for dashboard URL", "err", err)
+	}
+
+	daysUntilExpiry := int(time.Until(cfg.ExpiresAt()).Hours() / 24)
+	htmlBody, textBody, err := email.RenderDigest(digestData, inline, daysUntilExpiry)
+	if err != nil {
+		return fmt.Errorf("render digest: %w", err)
 	}
 
 	if !s.rateLimiter.Allow(fmt.Sprintf("email:%d", cfg.UserID)) {
@@ -372,8 +373,7 @@ func (s *Scheduler) sendDigest(ctx context.Context, cfg *store.Config, batch dig
 	}
 
 	subject := email.DigestSubject(digestData)
-	keepAliveURL := s.originURL + "/keep-alive/" + trackingToken
-	if err := s.mailer.Send(cfg.Email, subject, htmlBody, textBody, unsubToken, dashboardURL, keepAliveURL); err != nil {
+	if err := s.mailer.Send(cfg.Email, subject, htmlBody, textBody, digestData.Links); err != nil {
 		return fmt.Errorf("send email: %w", err)
 	}
 

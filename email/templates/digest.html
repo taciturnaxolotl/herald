@@ -38,12 +38,12 @@
 <body>
   {{if .ShowUrgentBanner}}
   <div class="expiry-banner expiry-urgent">
-    Your digest expires in {{.DaysUntilExpiry}} days. Click "keep this digest active" below to continue receiving
+    Your digest expires {{.ExpiresIn}}. Click "keep this digest active" below to continue receiving
     updates or your feed will be deactivated.
   </div>
   {{else if .ShowWarningBanner}}
   <div class="expiry-banner expiry-warning">
-    Your digest expires in {{.DaysUntilExpiry}} days. Click "keep this digest active" below to
+    Your digest expires {{.ExpiresIn}}. Click "keep this digest active" below to
     extend it.
   </div>
   {{end}}
@@ -80,6 +80,14 @@
     {{end}}
     {{end}}
   </div>
+  {{if .FooterLinks}}
+  <hr>
+  <p style="font-size: 12px; color: #666;">
+  {{- range $i, $link := .FooterLinks}}
+  {{if $i}}&bull; {{end}}<a href="{{$link.URL}}">{{$link.Label}}</a>
+  {{- end}}
+  </p>
+  {{end}}
 </body>
 
 </html>

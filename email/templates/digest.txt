@@ -1,8 +1,8 @@
 {{if .ShowUrgentBanner}}
-Your digest expires in {{.DaysUntilExpiry}} days. Click "keep this digest active" below to continue receiving updates or it will be deactivated.
+Your digest expires {{.ExpiresIn}}. Click "keep this digest active" below to continue receiving updates or it will be deactivated.
 
 {{else if .ShowWarningBanner}}
-Your digest expires in {{.DaysUntilExpiry}} days. Click "keep this digest active" below to extend it.
+Your digest expires {{.ExpiresIn}}. Click "keep this digest active" below to extend it.
 
 {{end}}
 {{range .FeedGroups}}
@@ -20,3 +20,8 @@ Summary
 {{end}}
 {{end}}
 {{end}}
+{{if .FooterLinks}}
+
+---
+{{range .FooterLinks}}{{.Label}}: {{.URL}}
+{{end}}{{end}}

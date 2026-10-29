@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"charm.land/log/v2"
+	"github.com/taciturnaxolotl/herald/email"
 	"github.com/taciturnaxolotl/herald/store"
 )
 
@@ -17,7 +18,7 @@ type fakeMailer struct {
 	err    error
 }
 
-func (m *fakeMailer) Send(_, _, _, _, _, _, _ string) error {
+func (m *fakeMailer) Send(_, _, _, _ string, _ email.DigestLinks) error {
 	if m.onSend != nil {
 		m.onSend()
 	}

@@ -38,18 +38,13 @@ type SMTPConfig struct {
 const smtpTimeout = 30 * time.Second
 
 type Mailer struct {
-	cfg          SMTPConfig
-	unsubBaseURL string
-	dkimKey      *rsa.PrivateKey
-	timeout      time.Duration
+	cfg     SMTPConfig
+	dkimKey *rsa.PrivateKey
+	timeout time.Duration
 }
 
-func NewMailer(cfg SMTPConfig, unsubBaseURL string) (*Mailer, error) {
-	m := &Mailer{
-		cfg:          cfg,
-		unsubBaseURL: unsubBaseURL,
-		timeout:      smtpTimeout,
-	}
+func NewMailer(cfg SMTPConfig) (*Mailer, error) {
+	m := &Mailer{cfg: cfg, timeout: smtpTimeout}
 
 	// Parse DKIM private key if provided
 	var keyData string
@@ -171,44 +166,9 @@ func (m *Mailer) transmit(to string, msg []byte) error {
 	return client.Quit()
 }
 
-func (m *Mailer) Send(to, subject, htmlBody, textBody, unsubToken, dashboardURL, keepAliveURL string) error {
-	// Add footer with keep-alive, unsubscribe, and dashboard links
-	var htmlFooter strings.Builder
-	var textFooter strings.Builder
-
-	if keepAliveURL != "" || unsubToken != "" || dashboardURL != "" {
-		// Each element on its own line so quoted-printable soft breaks land
-		// between tags, not mid-URL. A single 400-char line gets chopped at
-		// column 76 wherever that falls, which splits domains and schemes
-		// in a way that looks like obfuscation to content filters.
-		htmlFooter.WriteString("<hr>\n")
-		htmlFooter.WriteString(`<p style="font-size: 12px; color: #666;">` + "\n")
-		textFooter.WriteString("\n\n---\n")
-
-		var links []string
-		if keepAliveURL != "" {
-			links = append(links, fmt.Sprintf(`<a href="%s">keep this digest active</a>`, keepAliveURL))
-			fmt.Fprintf(&textFooter, "keep this digest active: %s\n", keepAliveURL)
-		}
-
-		if dashboardURL != "" {
-			links = append(links, fmt.Sprintf(`<a href="%s">profile</a>`, dashboardURL))
-			fmt.Fprintf(&textFooter, "profile: %s\n", dashboardURL)
-		}
-
-		if unsubToken != "" {
-			unsubURL := m.unsubBaseURL + "/unsubscribe/" + unsubToken
-			links = append(links, fmt.Sprintf(`<a href="%s">unsubscribe</a>`, unsubURL))
-			fmt.Fprintf(&textFooter, "unsubscribe: %s\n", unsubURL)
-		}
-
-		htmlFooter.WriteString(strings.Join(links, " &bull; \n"))
-		htmlFooter.WriteString("\n</p>")
-		htmlBody = injectHTMLFooter(htmlBody, htmlFooter.String())
-		textBody = textBody + textFooter.String()
-	}
-
-	// RFC 2369 list headers + bulk hints for the recurring digest.
+// Send delivers a rendered digest; its footer links are already in the bodies,
+// and they also drive the RFC 2369 list headers.
+func (m *Mailer) Send(to, subject, htmlBody, textBody string, links DigestLinks) error {
 	from := m.fromAddress()
 	extraHeaders := map[string]string{
 		"Auto-Submitted":   "auto-generated",
@@ -218,13 +178,12 @@ func (m *Mailer) Send(to, subject, htmlBody, textBody, unsubToken, dashboardURL,
 		"Reply-To":         from,
 		"X-MC-MailingList": from,
 	}
-	if dashboardURL != "" {
-		extraHeaders["List-Archive"] = fmt.Sprintf("<%s>", dashboardURL)
+	if links.Dashboard != "" {
+		extraHeaders["List-Archive"] = fmt.Sprintf("<%s>", links.Dashboard)
 	}
 	// RFC 8058 one-click unsubscribe.
-	if unsubToken != "" {
-		unsubURL := m.unsubBaseURL + "/unsubscribe/" + unsubToken
-		extraHeaders["List-Unsubscribe"] = fmt.Sprintf("<%s>", unsubURL)
+	if links.Unsubscribe != "" {
+		extraHeaders["List-Unsubscribe"] = fmt.Sprintf("<%s>", links.Unsubscribe)
 		extraHeaders["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
 	}
 
@@ -315,16 +274,6 @@ func (m *Mailer) fromHeader() string {
 		a.Name = "Herald"
 	}
 	return a.String()
-}
-
-// injectHTMLFooter places the footer inside the document body. Appending it
-// after </html> leaves content outside the root element, which is malformed
-// and a well-worn spam heuristic.
-func injectHTMLFooter(html, footer string) string {
-	if i := strings.LastIndex(strings.ToLower(html), "</body>"); i >= 0 {
-		return html[:i] + footer + html[i:]
-	}
-	return html + footer
 }
 
 // senderDomain extracts the domain part from an email address.

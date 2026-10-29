@@ -238,14 +238,39 @@ func TestDigestSubject(t *testing.T) {
 	}
 }
 
-func TestInjectHTMLFooter(t *testing.T) {
-	got := injectHTMLFooter("<html><body><p>hi</p></body></html>", "<hr>")
-	if got != "<html><body><p>hi</p><hr></body></html>" {
-		t.Errorf("footer landed outside body: %q", got)
+func TestRenderDigest_FooterAndBanner(t *testing.T) {
+	data := &DigestData{
+		FeedGroups: []FeedGroup{{FeedName: "Blog", FeedURL: "https://example.com/feed.xml", Items: []FeedItem{{Title: "Post", Link: "https://example.com/post"}}}},
+		TotalItems: 1,
+		Links: DigestLinks{
+			KeepAlive:   "https://herald.test/keep-alive/k",
+			Dashboard:   "https://herald.test/fp",
+			Unsubscribe: "https://herald.test/unsubscribe/u",
+		},
+	}
+	html, text, err := RenderDigest(data, false, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`href="https://herald.test/keep-alive/k"`, `href="https://herald.test/unsubscribe/u"`, "expires in 1 day."} {
+		if !strings.Contains(html, want) {
+			t.Errorf("HTML missing %q", want)
+		}
+	}
+	if !strings.Contains(text, "unsubscribe: https://herald.test/unsubscribe/u") {
+		t.Errorf("text footer missing unsubscribe link:\n%s", text)
+	}
+	if strings.Count(html, "<hr") != 1 {
+		t.Errorf("expected exactly one divider above the footer, got %d", strings.Count(html, "<hr"))
 	}
 
-	if got := injectHTMLFooter("<p>hi</p>", "<hr>"); got != "<p>hi</p><hr>" {
-		t.Errorf("fragment append = %q", got)
+	data.Links.KeepAlive = ""
+	html, _, err = RenderDigest(data, false, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(html, "expiry-banner expiry-") {
+		t.Error("no keep-alive link means no banner telling the reader to click it")
 	}
 }
 
