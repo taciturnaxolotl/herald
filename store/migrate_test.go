@@ -248,3 +248,29 @@ func TestNormalizeTimestampsConvertsOffsets(t *testing.T) {
 		t.Fatalf("normalized time reads back as %v, %v", u.CreatedAt, err)
 	}
 }
+
+func TestGrandfatherSubscriptions(t *testing.T) {
+	db := setupTestDB(t)
+	ctx := context.Background()
+	user, _ := db.GetOrCreateUser(ctx, "fp", "key")
+	_, _ = db.CreateConfig(ctx, user.ID, "old.txt", "old@example.com", "0 8 * * *", false, "raw", time.Now())
+	_, _ = db.CreateConfig(ctx, user.ID, "new.txt", "new@example.com", "0 8 * * *", false, "raw", time.Now())
+	if _, err := db.EnsurePendingVerification(ctx, user.ID, "new@example.com"); err != nil {
+		t.Fatal(err)
+	}
+
+	tx, _ := db.conn.BeginTx(ctx, nil)
+	if err := grandfatherSubscriptions(ctx, tx); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+
+	if ok, _ := db.IsEmailVerified(ctx, user.ID, "old@example.com"); !ok {
+		t.Error("a subscription with no verification history predates opt-in and should be confirmed")
+	}
+	if ok, _ := db.IsEmailVerified(ctx, user.ID, "new@example.com"); ok {
+		t.Error("a pending confirmation must stay pending")
+	}
+}

@@ -24,6 +24,7 @@ var migrations = []migration{
 	{"enforce uniqueness and drop redundant indexes", tightenIndexes},
 	{"drop never-recorded open and bounce tracking", dropEmailTracking},
 	{"store every timestamp in UTC", normalizeTimestamps},
+	{"treat subscriptions from before opt-in as confirmed", grandfatherSubscriptions},
 }
 
 // migrate applies pending migrations, each in its own transaction. Foreign
@@ -332,4 +333,16 @@ func normalizeTimestamps(ctx context.Context, tx *sql.Tx) error {
 		}
 	}
 	return nil
+}
+
+// grandfatherSubscriptions marks addresses verified for digests saved before
+// confirmed opt-in existed. Every upload since then creates a pending
+// verification row, so an address with no row at all predates the feature.
+func grandfatherSubscriptions(ctx context.Context, tx *sql.Tx) error {
+	_, err := tx.ExecContext(ctx, `
+	INSERT INTO verified_emails (user_id, email, verified_at)
+	SELECT DISTINCT c.user_id, c.email, strftime('%Y-%m-%d %H:%M:%f', 'now') || '+00:00'
+	FROM configs c
+	WHERE NOT EXISTS (SELECT 1 FROM verified_emails v WHERE v.user_id = c.user_id AND v.email = c.email)`)
+	return err
 }
