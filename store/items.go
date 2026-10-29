@@ -28,7 +28,8 @@ func (q *Queries) MarkItemSeen(ctx context.Context, feedID int64, guid, title, l
 	return nil
 }
 
-func (q *Queries) GetSeenItems(ctx context.Context, feedID int64, limit int) ([]*SeenItem, error) {
+// GetRecentItemsForConfig returns the newest items seen across all of a config's feeds.
+func (q *Queries) GetRecentItemsForConfig(ctx context.Context, configID int64, limit int) ([]*SeenItem, error) {
 	items, err := queryAll(ctx, q.q, func(s scanner) (*SeenItem, error) {
 		var item SeenItem
 		if err := s.Scan(&item.ID, &item.FeedID, &item.GUID, &item.Title, &item.Link, &item.SeenAt); err != nil {
@@ -36,10 +37,12 @@ func (q *Queries) GetSeenItems(ctx context.Context, feedID int64, limit int) ([]
 		}
 		return &item, nil
 	},
-		`SELECT id, feed_id, guid, title, link, seen_at
-		 FROM seen_items WHERE feed_id = ? ORDER BY seen_at DESC LIMIT ?`, feedID, limit)
+		`SELECT si.id, si.feed_id, si.guid, si.title, si.link, si.seen_at
+		 FROM seen_items si JOIN feeds f ON f.id = si.feed_id
+		 WHERE f.config_id = ?
+		 ORDER BY si.seen_at DESC, si.id DESC LIMIT ?`, configID, limit)
 	if err != nil {
-		return nil, fmt.Errorf("query seen items: %w", err)
+		return nil, fmt.Errorf("query recent items: %w", err)
 	}
 	return items, nil
 }

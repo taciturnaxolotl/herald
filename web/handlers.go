@@ -1,13 +1,14 @@
 package web
 
 import (
+	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"encoding/xml"
 	"errors"
 	"fmt"
 	"net/http"
-	"sort"
+	"strings"
 	"time"
 
 	"github.com/taciturnaxolotl/herald/store"
@@ -16,7 +17,6 @@ import (
 const (
 	maxFeedItems        = 100
 	shortFingerprintLen = 8
-	recentItemsLimit    = 50
 	feedCacheMaxAge     = 300 // 5 minutes
 )
 
@@ -187,11 +187,6 @@ type rssItem struct {
 	PubDate string `xml:"pubDate"`
 }
 
-type rssItemWithTime struct {
-	rssItem
-	parsedTime time.Time
-}
-
 type rssChannel struct {
 	Title       string    `xml:"title"`
 	Link        string    `xml:"link"`
@@ -203,98 +198,6 @@ type rssFeed struct {
 	XMLName xml.Name   `xml:"rss"`
 	Version string     `xml:"version,attr"`
 	Channel rssChannel `xml:"channel"`
-}
-
-func (s *Server) handleFeedXML(w http.ResponseWriter, r *http.Request, fingerprint, configFilename string) {
-	ctx := r.Context()
-
-	cfg, ok := s.lookupConfig(w, r, fingerprint, configFilename)
-	if !ok {
-		return
-	}
-
-	var items []rssItemWithTime
-	feeds, err := s.store.GetFeedsByConfig(ctx, cfg.ID)
-	if err != nil {
-		s.logger.Warn("get feeds", "err", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return
-	}
-
-	for _, feed := range feeds {
-		seenItems, err := s.store.GetSeenItems(ctx, feed.ID, 50)
-		if err != nil {
-			continue
-		}
-		for _, item := range seenItems {
-			rItem := rssItemWithTime{
-				rssItem: rssItem{
-					GUID:    item.GUID,
-					PubDate: item.SeenAt.Format(time.RFC1123Z),
-				},
-				parsedTime: item.SeenAt,
-			}
-			if item.Title.Valid {
-				rItem.Title = item.Title.String
-			}
-			if item.Link.Valid {
-				rItem.Link = item.Link.String
-			}
-			items = append(items, rItem)
-		}
-	}
-
-	sort.Slice(items, func(i, j int) bool {
-		return items[i].parsedTime.After(items[j].parsedTime)
-	})
-
-	if len(items) > maxFeedItems {
-		items = items[:maxFeedItems]
-	}
-
-	// Convert to rssItem for XML encoding
-	rssItems := make([]rssItem, len(items))
-	for i, item := range items {
-		rssItems[i] = item.rssItem
-	}
-
-	feed := rssFeed{
-		Version: "2.0",
-		Channel: rssChannel{
-			Title:       "Herald - " + configFilename,
-			Link:        s.origin + "/" + fingerprint + "/" + configFilename,
-			Description: "Feed for " + configFilename,
-			Items:       rssItems,
-		},
-	}
-
-	// Add caching headers
-	w.Header().Set("Content-Type", "application/rss+xml; charset=utf-8")
-	w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", feedCacheMaxAge))
-	if cfg.LastRun.Valid {
-		etag := fmt.Sprintf(`"%s-%d"`, short(fingerprint, shortFingerprintLen), cfg.LastRun.Time.Unix())
-		w.Header().Set("ETag", etag)
-		w.Header().Set("Last-Modified", cfg.LastRun.Time.UTC().Format(http.TimeFormat))
-
-		// Check If-None-Match
-		if match := r.Header.Get("If-None-Match"); match == etag {
-			w.WriteHeader(http.StatusNotModified)
-			return
-		}
-
-		// Check If-Modified-Since
-		if modSince := r.Header.Get("If-Modified-Since"); modSince != "" {
-			if t, err := http.ParseTime(modSince); err == nil && !cfg.LastRun.Time.After(t) {
-				w.WriteHeader(http.StatusNotModified)
-				return
-			}
-		}
-	}
-
-	_, _ = w.Write([]byte(xml.Header))
-	enc := xml.NewEncoder(w)
-	enc.Indent("", "  ")
-	_ = enc.Encode(feed)
 }
 
 type jsonFeed struct {
@@ -312,64 +215,90 @@ type jsonFeedItem struct {
 	DatePublished string `json:"date_published"`
 }
 
-type jsonFeedItemWithTime struct {
-	jsonFeedItem
-	parsedTime time.Time
+// loadFeed resolves a config's published feed and its newest items, answering
+// the request itself (404, 304, 500) when it returns false.
+func (s *Server) loadFeed(w http.ResponseWriter, r *http.Request, fingerprint, configFilename string) ([]*store.SeenItem, bool) {
+	cfg, ok := s.lookupConfig(w, r, fingerprint, configFilename)
+	if !ok {
+		return nil, false
+	}
+	if notModified(w, r, cfg) {
+		return nil, false
+	}
+	items, err := s.store.GetRecentItemsForConfig(r.Context(), cfg.ID, maxFeedItems)
+	if err != nil {
+		s.fail(w, err, "get recent items", "", "")
+		return nil, false
+	}
+	return items, true
 }
 
-func (s *Server) handleFeedJSON(w http.ResponseWriter, r *http.Request, fingerprint, configFilename string) {
-	ctx := r.Context()
+// notModified sets caching headers and reports whether the client's copy is current.
+// The ETag covers the config text too, since editing feeds changes the output.
+func notModified(w http.ResponseWriter, r *http.Request, cfg *store.Config) bool {
+	w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", feedCacheMaxAge))
+	if !cfg.LastRun.Valid {
+		return false
+	}
+	sum := sha256.Sum256([]byte(cfg.RawText))
+	etag := fmt.Sprintf(`"%d-%x"`, cfg.LastRun.Time.Unix(), sum[:8])
+	w.Header().Set("ETag", etag)
+	w.Header().Set("Last-Modified", cfg.LastRun.Time.UTC().Format(http.TimeFormat))
 
-	cfg, ok := s.lookupConfig(w, r, fingerprint, configFilename)
+	if match := r.Header.Get("If-None-Match"); match != "" {
+		for _, candidate := range strings.Split(match, ",") {
+			candidate = strings.TrimPrefix(strings.TrimSpace(candidate), "W/")
+			if candidate == etag || candidate == "*" {
+				w.WriteHeader(http.StatusNotModified)
+				return true
+			}
+		}
+		return false
+	}
+	if t, err := http.ParseTime(r.Header.Get("If-Modified-Since")); err == nil && !cfg.LastRun.Time.After(t) {
+		w.WriteHeader(http.StatusNotModified)
+		return true
+	}
+	return false
+}
+
+func (s *Server) handleFeedXML(w http.ResponseWriter, r *http.Request, fingerprint, configFilename string) {
+	items, ok := s.loadFeed(w, r, fingerprint, configFilename)
 	if !ok {
 		return
 	}
 
-	var items []jsonFeedItemWithTime
-	feeds, err := s.store.GetFeedsByConfig(ctx, cfg.ID)
-	if err != nil {
-		s.logger.Warn("get feeds", "err", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+	rssItems := make([]rssItem, len(items))
+	for i, item := range items {
+		rssItems[i] = rssItem{Title: item.Title.String, Link: item.Link.String, GUID: item.GUID, PubDate: item.SeenAt.Format(time.RFC1123Z)}
+	}
+	feed := rssFeed{
+		Version: "2.0",
+		Channel: rssChannel{
+			Title:       "Herald - " + configFilename,
+			Link:        s.origin + "/" + fingerprint + "/" + configFilename,
+			Description: "Feed for " + configFilename,
+			Items:       rssItems,
+		},
+	}
+
+	w.Header().Set("Content-Type", "application/rss+xml; charset=utf-8")
+	_, _ = w.Write([]byte(xml.Header))
+	enc := xml.NewEncoder(w)
+	enc.Indent("", "  ")
+	_ = enc.Encode(feed)
+}
+
+func (s *Server) handleFeedJSON(w http.ResponseWriter, r *http.Request, fingerprint, configFilename string) {
+	items, ok := s.loadFeed(w, r, fingerprint, configFilename)
+	if !ok {
 		return
 	}
 
-	for _, feed := range feeds {
-		seenItems, err := s.store.GetSeenItems(ctx, feed.ID, recentItemsLimit)
-		if err != nil {
-			continue
-		}
-		for _, item := range seenItems {
-			jItem := jsonFeedItemWithTime{
-				jsonFeedItem: jsonFeedItem{
-					ID:            item.GUID,
-					DatePublished: item.SeenAt.Format(time.RFC3339),
-				},
-				parsedTime: item.SeenAt,
-			}
-			if item.Title.Valid {
-				jItem.Title = item.Title.String
-			}
-			if item.Link.Valid {
-				jItem.URL = item.Link.String
-			}
-			items = append(items, jItem)
-		}
-	}
-
-	sort.Slice(items, func(i, j int) bool {
-		return items[i].parsedTime.After(items[j].parsedTime)
-	})
-
-	if len(items) > maxFeedItems {
-		items = items[:maxFeedItems]
-	}
-
-	// Convert to jsonFeedItem for JSON encoding
 	jsonItems := make([]jsonFeedItem, len(items))
 	for i, item := range items {
-		jsonItems[i] = item.jsonFeedItem
+		jsonItems[i] = jsonFeedItem{ID: item.GUID, URL: item.Link.String, Title: item.Title.String, DatePublished: item.SeenAt.Format(time.RFC3339)}
 	}
-
 	feed := jsonFeed{
 		Version:     "https://jsonfeed.org/version/1.1",
 		Title:       "Herald - " + configFilename,
@@ -378,29 +307,7 @@ func (s *Server) handleFeedJSON(w http.ResponseWriter, r *http.Request, fingerpr
 		Items:       jsonItems,
 	}
 
-	// Add caching headers
 	w.Header().Set("Content-Type", "application/feed+json; charset=utf-8")
-	w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", feedCacheMaxAge))
-	if cfg.LastRun.Valid {
-		etag := fmt.Sprintf(`"%s-%d"`, short(fingerprint, shortFingerprintLen), cfg.LastRun.Time.Unix())
-		w.Header().Set("ETag", etag)
-		w.Header().Set("Last-Modified", cfg.LastRun.Time.UTC().Format(http.TimeFormat))
-
-		// Check If-None-Match
-		if match := r.Header.Get("If-None-Match"); match == etag {
-			w.WriteHeader(http.StatusNotModified)
-			return
-		}
-
-		// Check If-Modified-Since
-		if modSince := r.Header.Get("If-Modified-Since"); modSince != "" {
-			if t, err := http.ParseTime(modSince); err == nil && !cfg.LastRun.Time.After(t) {
-				w.WriteHeader(http.StatusNotModified)
-				return
-			}
-		}
-	}
-
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	_ = enc.Encode(feed)
