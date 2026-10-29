@@ -135,7 +135,7 @@ func TestRenderDigest_TextOutputNoHTMLTags(t *testing.T) {
 	}
 }
 
-func TestRenderDigest_TinyImagesStripped(t *testing.T) {
+func TestRenderDigest_StripImageHosts(t *testing.T) {
 	data := &DigestData{
 		ConfigName:      "Test Config",
 		TotalItems:      1,
@@ -163,9 +163,8 @@ func TestRenderDigest_TinyImagesStripped(t *testing.T) {
 		t.Fatalf("RenderDigest failed: %v", err)
 	}
 
-	// Verify tiny image with Tailwind sizing class is stripped
 	if strings.Contains(htmlOutput, `stickers.xeiaso.net`) {
-		t.Error("tiny sticker image was not stripped from HTML output")
+		t.Error("image from a strip_image_hosts host was not removed")
 	}
 
 	// Verify normal <img> without tiny classes is preserved
@@ -347,5 +346,12 @@ func TestDedentPreBlock(t *testing.T) {
 		if got := preBlockFull.ReplaceAllStringFunc(c.in, dedentPreBlock); got != c.want {
 			t.Errorf("%s:\ngot  %q\nwant %q", name, got, c.want)
 		}
+	}
+}
+
+func TestSanitizeHTML_StripsTinySizedImages(t *testing.T) {
+	out := sanitizeHTML(`<p><img src="https://x/a.png" width="32"><img src="https://x/b.png" width="600"></p>`, nil, nil)
+	if strings.Contains(out, "a.png") || !strings.Contains(out, "b.png") {
+		t.Errorf("only the 32px image should be removed, got %q", out)
 	}
 }

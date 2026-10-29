@@ -92,13 +92,20 @@ type templateFeedGroup struct {
 // emailUnsafeTags are HTML5 semantic tags not supported by most email clients (Gmail, Outlook, etc.)
 var emailUnsafeTags = regexp.MustCompile(`</?(?:article|section|nav|header|footer|aside|main|figure|figcaption|mark|time|dialog)(?:\s[^>]*)?>`)
 
-// tinyImageTags matches <img> tags with small fixed dimensions (e.g., character stickers, decorative avatars).
-// The class-based patterns cover Tailwind h-8 (32px), h-12 (48px), h-16 (64px) sizing.
-// The src pattern catches images from sticker/image delivery domains.
-var (
-	tinyImageTags    = regexp.MustCompile(`<img[^>]*\sclass="[^"]*\bh-(?:8|12|16)\b[^"]*"[^>]*\/?>`)
-	tinyInlineImages = regexp.MustCompile(`<img[^>]*\s(?:width|height)="(?:\d|[1-5]\d|6[0-4])"[^>]*\/?>`)
-)
+// tinyInlineImages matches <img> tags sized 64px or less (stickers, decorative avatars).
+var tinyInlineImages = regexp.MustCompile(`<img[^>]*\s(?:width|height)="(?:\d|[1-5]\d|6[0-4])"[^>]*\/?>`)
+
+// imageHostPattern matches <img> tags whose src is on any of hosts, or nil for none.
+func imageHostPattern(hosts []string) *regexp.Regexp {
+	if len(hosts) == 0 {
+		return nil
+	}
+	quoted := make([]string, len(hosts))
+	for i, h := range hosts {
+		quoted[i] = regexp.QuoteMeta(h)
+	}
+	return regexp.MustCompile(`<img[^>]*\ssrc="[^"]*(?:` + strings.Join(quoted, "|") + `)[^"]*"[^>]*\/?>`)
+}
 
 // detailsBlocks flattens <details>/<summary>, which Gmail and Outlook can't collapse, into a labelled aside.
 var detailsBlocks = strings.NewReplacer(
@@ -121,19 +128,16 @@ var preTagOpen = regexp.MustCompile(`<pre(?:\s[^>]*)?>`)
 const codeBlockStyle = `<pre style="background-color:#f5f5f5;padding:12px;border-radius:4px;overflow-x:auto;font-family:monospace;font-size:13px;line-height:1.4">`
 
 // sanitizeHTML sanitizes HTML content, allowing safe tags while stripping styles and unsafe elements.
-// stripHosts lists image source hosts whose <img> tags should be removed.
-// base resolves relative src/href values, which email clients cannot.
-func sanitizeHTML(htmlStr string, base *url.URL, stripHosts []string) string {
+// stripImages, if set, removes matching <img> tags; base resolves relative
+// src/href values, which email clients cannot.
+func sanitizeHTML(htmlStr string, base *url.URL, stripImages *regexp.Regexp) string {
 	sanitized := policy.Sanitize(htmlStr)
 	sanitized = resolveRelativeURLs(sanitized, base)
 	// Strip HTML5 semantic tags that email clients don't support
 	sanitized = emailUnsafeTags.ReplaceAllString(sanitized, "")
 	sanitized = detailsBlocks.Replace(sanitized)
-	// Strip tiny decorative images (character stickers, small avatars) that don't render well in email
-	sanitized = tinyImageTags.ReplaceAllString(sanitized, "")
-	for _, host := range stripHosts {
-		re := regexp.MustCompile(`<img[^>]*\ssrc="[^"]*` + regexp.QuoteMeta(host) + `[^"]*"[^>]*\/?>`)
-		sanitized = re.ReplaceAllString(sanitized, "")
+	if stripImages != nil {
+		sanitized = stripImages.ReplaceAllString(sanitized, "")
 	}
 	sanitized = tinyInlineImages.ReplaceAllString(sanitized, "")
 	// Strip span tags (removes syntax highlighting noise from code blocks)
@@ -291,15 +295,16 @@ func DigestSubject(data *DigestData) string {
 }
 
 func RenderDigest(data *DigestData, inline bool, daysUntilExpiry int) (html string, text string, err error) {
+	stripImages := imageHostPattern(data.StripImageHosts)
 	groups := make([]templateFeedGroup, len(data.FeedGroups))
 	for i, group := range data.FeedGroups {
 		items := make([]templateFeedItem, len(group.Items))
 		for j, item := range group.Items {
-			items[j] = templateFeedItem{
-				Title:            item.Title,
-				Link:             item.Link,
-				PlainContent:     stripHTML(item.Content),
-				SanitizedContent: htmltemplate.HTML(sanitizeHTML(item.Content, entryURL(group.FeedURL, item.Link), data.StripImageHosts)), // #nosec G203 -- Content is sanitized by bluemonday before conversion
+			items[j] = templateFeedItem{Title: item.Title, Link: item.Link}
+			// Content is only shown inline, so skip the costly cleanup otherwise.
+			if inline {
+				items[j].PlainContent = stripHTML(item.Content)
+				items[j].SanitizedContent = htmltemplate.HTML(sanitizeHTML(item.Content, entryURL(group.FeedURL, item.Link), stripImages)) // #nosec G203 -- Content is sanitized by bluemonday before conversion
 			}
 		}
 		groups[i] = templateFeedGroup{FeedName: group.FeedName, FeedURL: group.FeedURL, Items: items}
