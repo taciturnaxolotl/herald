@@ -31,6 +31,7 @@ type Config struct {
 
 type Server struct {
 	cfg         Config
+	allowedFPs  map[string]bool
 	store       *store.DB
 	scheduler   *scheduler.Scheduler
 	logger      *log.Logger
@@ -40,11 +41,26 @@ type Server struct {
 func NewServer(cfg Config, st *store.DB, sched *scheduler.Scheduler, logger *log.Logger) *Server {
 	return &Server{
 		cfg:         cfg,
+		allowedFPs:  allowedFingerprints(cfg.AllowedKeys, logger),
 		store:       st,
 		scheduler:   sched,
 		logger:      logger,
 		rateLimiter: ratelimit.New(5, 10), // 5 req/sec, burst of 10 for SSH/SCP
 	}
+}
+
+// allowedFingerprints parses authorized_keys-style entries, comments included.
+func allowedFingerprints(keys []string, logger *log.Logger) map[string]bool {
+	fps := make(map[string]bool, len(keys))
+	for _, k := range keys {
+		key, _, _, _, err := gossh.ParseAuthorizedKey([]byte(k))
+		if err != nil {
+			logger.Warn("ignoring unparseable allowed key", "key", k, "err", err)
+			continue
+		}
+		fps[gossh.FingerprintSHA256(key)] = true
+	}
+	return fps
 }
 
 func (s *Server) ListenAndServe(ctx context.Context) error {
@@ -108,18 +124,9 @@ func (s *Server) publicKeyHandler(ctx ssh.Context, key ssh.PublicKey) bool {
 		return false
 	}
 
-	if !s.cfg.AllowAllKeys {
-		allowed := false
-		for _, k := range s.cfg.AllowedKeys {
-			if k == pubkeyStr {
-				allowed = true
-				break
-			}
-		}
-		if !allowed {
-			s.logger.Warn("rejected key", "fingerprint", fp)
-			return false
-		}
+	if !s.cfg.AllowAllKeys && !s.allowedFPs[gossh.FingerprintSHA256(key)] {
+		s.logger.Warn("rejected key", "fingerprint", fp)
+		return false
 	}
 
 	user, err := s.store.GetOrCreateUser(ctx, fp, pubkeyStr)
