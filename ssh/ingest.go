@@ -152,10 +152,12 @@ func formatUploadError(filename string, err error) string {
 			noun = "feed"
 		}
 		fmt.Fprintf(&b, "\nherald: rejected %s, %d %s could not be used:\n\n", filename, len(feedErrs), noun)
-		for _, fe := range feedErrs {
-			fmt.Fprintf(&b, "  %s\n    %v\n\n", fe.URL, fe.Err)
+		for i, fe := range feedErrs {
+			if i > 0 {
+				b.WriteString("\n")
+			}
+			fmt.Fprintf(&b, "  %s\n    %v\n", fe.URL, fe.Err)
 		}
-		b.WriteString("Nothing was saved. Fix or remove these feeds and upload again.\n")
 		return b.String()
 	}
 	var lineErrs config.LineErrors
@@ -166,7 +168,7 @@ func formatUploadError(filename string, err error) string {
 		}
 		return b.String()
 	}
-	fmt.Fprintf(&b, "\nherald: rejected %s: %v\nNothing was saved.\n", filename, err)
+	fmt.Fprintf(&b, "\nherald: rejected %s: %v\n", filename, err)
 	return b.String()
 }
 

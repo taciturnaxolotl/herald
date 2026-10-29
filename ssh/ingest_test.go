@@ -22,7 +22,6 @@ func TestFormatUploadError_ListsEveryFeed(t *testing.T) {
 		"rejected daily.txt, 2 feeds could not be used",
 		"  https://a.example/feed.xml\n    server returned 404 Not Found\n",
 		"  https://b.example/feed.xml\n    not an RSS, Atom or JSON feed (server sent text/html)\n",
-		"Nothing was saved.",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q in:\n%s", want, got)
