@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -69,11 +70,7 @@ func LoadAppConfig(path string) (*AppConfig, error) {
 			return nil, fmt.Errorf("failed to read config file: %w", err)
 		}
 
-		expanded := os.Expand(string(data), func(key string) string {
-			return os.Getenv(key)
-		})
-
-		if err := yaml.Unmarshal([]byte(expanded), cfg); err != nil {
+		if err := yaml.Unmarshal([]byte(expandEnv(string(data))), cfg); err != nil {
 			return nil, fmt.Errorf("failed to parse config file: %w", err)
 		}
 	}
@@ -86,6 +83,16 @@ func LoadAppConfig(path string) (*AppConfig, error) {
 	}
 
 	return cfg, nil
+}
+
+// envRef matches only the documented ${VAR} form, so a bare $ in a password
+// or key survives untouched.
+var envRef = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
+
+func expandEnv(s string) string {
+	return envRef.ReplaceAllStringFunc(s, func(m string) string {
+		return os.Getenv(m[2 : len(m)-1])
+	})
 }
 
 // findEnvFile looks for .env file in the config file's directory or current directory
