@@ -272,22 +272,14 @@ func (b digestBatch) total() int {
 
 func (s *Scheduler) collectNewItems(ctx context.Context, results []*FetchResult) digestBatch {
 	var batch digestBatch
-	maxAge := time.Now().UTC().Add(-itemMaxAge)
-
 	for _, result := range results {
 		if result.Error != nil {
 			continue
 		}
-
-		var recent []FetchedItem
-		var guids []string
-		for _, item := range result.Items {
-			if item.Published.IsZero() || !item.Published.Before(maxAge) {
-				recent = append(recent, item)
-				guids = append(guids, item.GUID)
-			}
+		guids := make([]string, len(result.Items))
+		for i, item := range result.Items {
+			guids[i] = item.GUID
 		}
-
 		seenSet, err := s.store.GetSeenGUIDs(ctx, result.FeedID, guids)
 		if err != nil {
 			// Skip the feed entirely, so nothing from it is marked seen unsent.
@@ -295,30 +287,33 @@ func (s *Scheduler) collectNewItems(ctx context.Context, results []*FetchResult)
 			continue
 		}
 
-		var newItems []email.FeedItem
-		for _, item := range recent {
-			if !seenSet[item.GUID] {
-				newItems = append(newItems, email.FeedItem{
-					Title:     item.Title,
-					Link:      item.Link,
-					Content:   item.Content,
-					Published: item.Published,
-				})
-			}
-		}
 		for _, item := range result.Items {
 			batch.seen = append(batch.seen, seenItem{result.FeedID, item.GUID, item.Title, item.Link})
 		}
-
-		if len(newItems) > 0 {
-			batch.groups = append(batch.groups, email.FeedGroup{
-				FeedName: cmp.Or(result.FeedName, result.FeedURL),
-				FeedURL:  result.FeedURL,
-				Items:    newItems,
-			})
+		if group := DigestGroup(result, seenSet, time.Now()); len(group.Items) > 0 {
+			batch.groups = append(batch.groups, group)
 		}
 	}
 	return batch
+}
+
+// DigestGroup is the section of a digest one fetched feed contributes: its
+// recent entries that are not in seen.
+func DigestGroup(result *FetchResult, seen map[string]bool, now time.Time) email.FeedGroup {
+	group := email.FeedGroup{FeedName: cmp.Or(result.FeedName, result.FeedURL), FeedURL: result.FeedURL}
+	maxAge := now.Add(-itemMaxAge)
+	for _, item := range result.Items {
+		if seen[item.GUID] || (!item.Published.IsZero() && item.Published.Before(maxAge)) {
+			continue
+		}
+		group.Items = append(group.Items, email.FeedItem{
+			Title:     item.Title,
+			Link:      item.Link,
+			Content:   item.Content,
+			Published: item.Published,
+		})
+	}
+	return group
 }
 
 func (s *Scheduler) sendDigest(ctx context.Context, cfg *store.Config, batch digestBatch) error {

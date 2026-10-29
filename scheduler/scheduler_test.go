@@ -125,3 +125,20 @@ func TestRunRefusesOverlappingRunsOfOneConfig(t *testing.T) {
 		t.Fatalf("expected overlap refusal, got %v", err)
 	}
 }
+
+func TestDigestGroupFiltersSeenAndOldItems(t *testing.T) {
+	now := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	result := &FetchResult{FeedURL: "https://example.com/feed.xml", Items: []FetchedItem{
+		{GUID: "new", Published: now.Add(-time.Hour)},
+		{GUID: "seen", Published: now.Add(-time.Hour)},
+		{GUID: "old", Published: now.Add(-itemMaxAge - time.Hour)},
+		{GUID: "undated"},
+	}}
+	group := DigestGroup(result, map[string]bool{"seen": true}, now)
+	if group.FeedName != result.FeedURL {
+		t.Errorf("unnamed feed should fall back to its URL, got %q", group.FeedName)
+	}
+	if len(group.Items) != 2 {
+		t.Fatalf("expected the new and undated items, got %d", len(group.Items))
+	}
+}

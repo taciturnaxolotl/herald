@@ -163,43 +163,22 @@ func runPreview(ctx context.Context, feedURL, outputFile string, inline bool) er
 		return fmt.Errorf("fetch feed: %w", fetched.Error)
 	}
 
-	if len(fetched.Items) == 0 {
-		return fmt.Errorf("no items found in feed")
+	group := scheduler.DigestGroup(fetched, nil, time.Now())
+	if len(group.Items) == 0 {
+		return fmt.Errorf("no recent items found in feed")
 	}
-
-	feedName := fetched.FeedName
-	if feedName == "" {
-		feedName = feedURL
-	}
-
-	var items []email.FeedItem
-	for _, item := range fetched.Items {
-		items = append(items, email.FeedItem{
-			Title:     item.Title,
-			Link:      item.Link,
-			Content:   item.Content,
-			Published: item.Published,
-		})
-	}
-
 	data := &email.DigestData{
 		ConfigName: "preview",
-		TotalItems: len(items),
-		FeedGroups: []email.FeedGroup{
-			{
-				FeedName: feedName,
-				FeedURL:  feedURL,
-				Items:    items,
-			},
-		},
+		TotalItems: len(group.Items),
+		FeedGroups: []email.FeedGroup{group},
 	}
 
-	htmlOutput, _, err := email.RenderDigest(data, inline, 90)
+	htmlOutput, _, err := email.RenderDigest(data, inline, store.InactivityDays)
 	if err != nil {
 		return fmt.Errorf("render digest: %w", err)
 	}
 
-	gmailOutput, err := email.WrapForGMailPreview(htmlOutput, feedName)
+	gmailOutput, err := email.WrapForGMailPreview(htmlOutput, email.DigestSubject(data))
 	if err != nil {
 		return fmt.Errorf("gmail wrap: %w", err)
 	}
@@ -207,7 +186,7 @@ func runPreview(ctx context.Context, feedURL, outputFile string, inline bool) er
 	if err := os.WriteFile(outputFile, []byte(gmailOutput), 0o600); err != nil {
 		return fmt.Errorf("write output: %w", err)
 	}
-	logger.Info("preview written", "file", outputFile, "items", len(items))
+	logger.Info("preview written", "file", outputFile, "items", len(group.Items))
 	return nil
 }
 
