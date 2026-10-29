@@ -141,7 +141,7 @@ func (s *Server) handleUser(w http.ResponseWriter, r *http.Request, fingerprint 
 		}
 
 		// Get engagement stats (last 90 days)
-		totalSends, _, _, _, err := s.store.GetConfigEngagement(cfg.ID, 90)
+		totalSends, err := s.store.CountRecentSends(ctx, cfg.ID, 90)
 		if err != nil {
 			s.logger.Warn("get engagement", "config_id", cfg.ID, "err", err)
 			// Continue without engagement data
@@ -578,7 +578,7 @@ func (s *Server) handleUnsubscribePOST(w http.ResponseWriter, r *http.Request, t
 			return
 		}
 
-		if err := s.store.DeactivateConfig(ctx, cfg.ID); err != nil {
+		if err := s.store.SetNextRun(ctx, cfg.ID, nil); err != nil {
 			s.logger.Error("deactivate config", "err", err)
 			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 			return
@@ -617,7 +617,7 @@ func (s *Server) handleUnsubscribePOST(w http.ResponseWriter, r *http.Request, t
 	var message string
 
 	if action == "deactivate" {
-		if err := s.store.DeactivateConfig(ctx, cfg.ID); err != nil {
+		if err := s.store.SetNextRun(ctx, cfg.ID, nil); err != nil {
 			s.logger.Error("deactivate config", "err", err)
 			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 			return

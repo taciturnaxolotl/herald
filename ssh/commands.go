@@ -177,7 +177,7 @@ func handleActivate(ctx context.Context, sess ssh.Session, user *store.User, st 
 		return
 	}
 
-	err = st.ActivateConfig(ctx, user.ID, filename)
+	err = st.ActivateConfig(ctx, cfg)
 	if err != nil {
 		println(sess, errorStyle.Render("Error: "+err.Error()))
 		return
@@ -187,8 +187,12 @@ func handleActivate(ctx context.Context, sess ssh.Session, user *store.User, st 
 }
 
 func handleDeactivate(ctx context.Context, sess ssh.Session, user *store.User, st *store.DB, filename string) {
-	err := st.DeactivateConfigByFilename(ctx, user.ID, filename)
+	cfg, err := st.GetConfig(ctx, user.ID, filename)
 	if err != nil {
+		println(sess, errorStyle.Render("Config not found: "+filename))
+		return
+	}
+	if err := st.SetNextRun(ctx, cfg.ID, nil); err != nil {
 		println(sess, errorStyle.Render("Error: "+err.Error()))
 		return
 	}

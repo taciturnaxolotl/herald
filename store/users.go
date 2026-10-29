@@ -3,8 +3,6 @@ package store
 
 import (
 	"context"
-	"database/sql"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -29,73 +27,42 @@ type User struct {
 	CreatedAt time.Time
 }
 
-func (db *DB) GetOrCreateUser(ctx context.Context, pubkeyFP, pubkey string) (*User, error) {
-	user, err := db.GetUserByFingerprint(ctx, pubkeyFP)
-	if err == nil {
-		return user, nil
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
+func scanUser(s scanner) (*User, error) {
+	var u User
+	if err := s.Scan(&u.ID, &u.PubkeyFP, &u.Pubkey, &u.CreatedAt); err != nil {
 		return nil, err
 	}
+	return &u, nil
+}
 
-	result, err := db.ExecContext(ctx,
-		`INSERT INTO users (pubkey_fp, pubkey) VALUES (?, ?)`,
+// GetOrCreateUser is race-free: concurrent first logins for one key both get the same row.
+func (q *Queries) GetOrCreateUser(ctx context.Context, pubkeyFP, pubkey string) (*User, error) {
+	if _, err := q.q.ExecContext(ctx,
+		`INSERT INTO users (pubkey_fp, pubkey) VALUES (?, ?) ON CONFLICT(pubkey_fp) DO NOTHING`,
 		pubkeyFP, pubkey,
-	)
-	if err != nil {
+	); err != nil {
 		return nil, fmt.Errorf("insert user: %w", err)
 	}
-
-	id, err := result.LastInsertId()
-	if err != nil {
-		return nil, fmt.Errorf("get last insert id: %w", err)
-	}
-
-	return &User{
-		ID:        id,
-		PubkeyFP:  pubkeyFP,
-		Pubkey:    pubkey,
-		CreatedAt: time.Now().UTC(),
-	}, nil
+	return q.GetUserByFingerprint(ctx, pubkeyFP)
 }
 
-func (db *DB) GetUserByFingerprint(ctx context.Context, fp string) (*User, error) {
-	var user User
-	err := db.QueryRowContext(ctx,
-		`SELECT id, pubkey_fp, pubkey, created_at FROM users WHERE pubkey_fp = ?`,
-		fp,
-	).Scan(&user.ID, &user.PubkeyFP, &user.Pubkey, &user.CreatedAt)
-	if err != nil {
-		return nil, err
-	}
-	return &user, nil
+func (q *Queries) GetUserByFingerprint(ctx context.Context, fp string) (*User, error) {
+	return scanUser(q.q.QueryRowContext(ctx, `SELECT id, pubkey_fp, pubkey, created_at FROM users WHERE pubkey_fp = ?`, fp))
 }
 
-func (db *DB) GetUserByID(ctx context.Context, userID int64) (*User, error) {
-	var user User
-	err := db.QueryRowContext(ctx,
-		`SELECT id, pubkey_fp, pubkey, created_at FROM users WHERE id = ?`,
-		userID,
-	).Scan(&user.ID, &user.PubkeyFP, &user.Pubkey, &user.CreatedAt)
-	if err != nil {
-		return nil, err
-	}
-	return &user, nil
+func (q *Queries) GetUserByID(ctx context.Context, userID int64) (*User, error) {
+	return scanUser(q.q.QueryRowContext(ctx, `SELECT id, pubkey_fp, pubkey, created_at FROM users WHERE id = ?`, userID))
 }
 
 func (db *DB) DeleteUser(ctx context.Context, userID int64) error {
-	tx, err := db.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	// configs.user_id has no ON DELETE CASCADE, so configs must go first.
-	if _, err := tx.ExecContext(ctx, `DELETE FROM configs WHERE user_id = ?`, userID); err != nil {
-		return fmt.Errorf("delete configs: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, userID); err != nil {
-		return fmt.Errorf("delete user: %w", err)
-	}
-	return tx.Commit()
+	return db.WithTx(ctx, func(q *Queries) error {
+		// configs.user_id has no ON DELETE CASCADE, so configs must go first.
+		if _, err := q.q.ExecContext(ctx, `DELETE FROM configs WHERE user_id = ?`, userID); err != nil {
+			return fmt.Errorf("delete configs: %w", err)
+		}
+		if _, err := q.q.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, userID); err != nil {
+			return fmt.Errorf("delete user: %w", err)
+		}
+		return nil
+	})
 }

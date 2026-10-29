@@ -2,7 +2,6 @@ package ssh
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"io"
@@ -68,36 +67,30 @@ func (u *uploader) ingest(ctx context.Context, user *store.User, remoteAddr net.
 		return fmt.Errorf("failed to calculate next run: %w", err)
 	}
 
-	tx, err := u.store.BeginTx(ctx)
-	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	existingCfg, err := u.store.GetConfigTx(ctx, tx, user.ID, filename)
 	var cfg *store.Config
-	if err == nil {
-		if err := u.store.UpdateConfigTx(ctx, tx, existingCfg.ID, parsed.Email, parsed.CronExpr, parsed.Digest, parsed.Inline, content, nextRun); err != nil {
-			return fmt.Errorf("failed to update config: %w", err)
+	err = u.store.WithTx(ctx, func(q *store.Queries) error {
+		existingCfg, err := q.GetConfig(ctx, user.ID, filename)
+		if err == nil {
+			if err := q.UpdateConfig(ctx, existingCfg.ID, parsed.Email, parsed.CronExpr, parsed.Digest, parsed.Inline, content, nextRun); err != nil {
+				return fmt.Errorf("failed to update config: %w", err)
+			}
+			cfg = existingCfg
+			return syncFeeds(ctx, q, cfg.ID, parsed.Feeds, fetched)
 		}
-		cfg = existingCfg
-		if err := syncFeedsTx(ctx, u.store, tx, cfg.ID, parsed.Feeds, fetched); err != nil {
-			return err
-		}
-	} else {
-		cfg, err = u.store.CreateConfigTx(ctx, tx, user.ID, filename, parsed.Email, parsed.CronExpr, parsed.Digest, parsed.Inline, content, nextRun)
+
+		cfg, err = q.CreateConfig(ctx, user.ID, filename, parsed.Email, parsed.CronExpr, parsed.Digest, parsed.Inline, content, nextRun)
 		if err != nil {
 			return fmt.Errorf("failed to create config: %w", err)
 		}
 		for _, feed := range parsed.Feeds {
-			if _, err := u.store.CreateFeedTx(ctx, tx, cfg.ID, feed.URL, feed.Name); err != nil {
+			if _, err := q.CreateFeed(ctx, cfg.ID, feed.URL, feed.Name); err != nil {
 				return fmt.Errorf("failed to create feed: %w", err)
 			}
 		}
-	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit transaction: %w", err)
+		return nil
+	})
+	if err != nil {
+		return err
 	}
 
 	// Confirmed opt-in: a config only becomes active once the destination
@@ -110,7 +103,7 @@ func (u *uploader) ingest(ctx context.Context, user *store.User, remoteAddr net.
 		u.logger.Warn("verification check failed, holding config inactive", "err", err)
 	}
 	if err != nil || !verified {
-		if err := u.store.DeactivateConfig(ctx, cfg.ID); err != nil {
+		if err := u.store.SetNextRun(ctx, cfg.ID, nil); err != nil {
 			u.logger.Warn("failed to hold unverified config inactive", "err", err)
 		}
 	}
@@ -173,11 +166,11 @@ func fetchFeeds(ctx context.Context, feeds []config.FeedEntry) (map[string][]sch
 	return items, nil
 }
 
-// syncFeedsTx reconciles an existing config's feeds with the parsed set: update
+// syncFeeds reconciles an existing config's feeds with the parsed set: update
 // names of feeds that persist, create new ones (pre-seeding their current items
 // as seen), and delete those no longer present.
-func syncFeedsTx(ctx context.Context, st *store.DB, tx *sql.Tx, configID int64, feeds []config.FeedEntry, fetched map[string][]scheduler.FetchedItem) error {
-	existingFeeds, err := st.GetFeedsByConfigTx(ctx, tx, configID)
+func syncFeeds(ctx context.Context, q *store.Queries, configID int64, feeds []config.FeedEntry, fetched map[string][]scheduler.FetchedItem) error {
+	existingFeeds, err := q.GetFeedsByConfig(ctx, configID)
 	if err != nil {
 		return fmt.Errorf("failed to get existing feeds: %w", err)
 	}
@@ -193,17 +186,17 @@ func syncFeedsTx(ctx context.Context, st *store.DB, tx *sql.Tx, configID int64, 
 
 	for _, newFeed := range feeds {
 		if existingFeed, exists := existingByURL[newFeed.URL]; exists {
-			if err := st.UpdateFeedTx(ctx, tx, existingFeed.ID, newFeed.Name); err != nil {
+			if err := q.UpdateFeedName(ctx, existingFeed.ID, newFeed.Name); err != nil {
 				return fmt.Errorf("failed to update feed: %w", err)
 			}
 			continue
 		}
-		newFeedRecord, err := st.CreateFeedTx(ctx, tx, configID, newFeed.URL, newFeed.Name)
+		newFeedRecord, err := q.CreateFeed(ctx, configID, newFeed.URL, newFeed.Name)
 		if err != nil {
 			return fmt.Errorf("failed to create feed: %w", err)
 		}
 		for _, item := range fetched[newFeed.URL] {
-			if err := st.MarkItemSeenTx(ctx, tx, newFeedRecord.ID, item.GUID, item.Title, item.Link); err != nil {
+			if err := q.MarkItemSeen(ctx, newFeedRecord.ID, item.GUID, item.Title, item.Link); err != nil {
 				return fmt.Errorf("failed to preseed seen items: %w", err)
 			}
 		}
@@ -211,7 +204,7 @@ func syncFeedsTx(ctx context.Context, st *store.DB, tx *sql.Tx, configID int64, 
 
 	for _, existingFeed := range existingFeeds {
 		if _, stillExists := newByURL[existingFeed.URL]; !stillExists {
-			if err := st.DeleteFeedTx(ctx, tx, existingFeed.ID); err != nil {
+			if err := q.DeleteFeed(ctx, existingFeed.ID); err != nil {
 				return fmt.Errorf("failed to delete feed: %w", err)
 			}
 		}

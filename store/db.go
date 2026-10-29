@@ -4,49 +4,94 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 
 	_ "github.com/mattn/go-sqlite3"
 )
 
-type DB struct {
-	*sql.DB
-	stmts *preparedStmts
+// querier is satisfied by both *sql.DB and *sql.Tx, so every query is written once.
+type querier interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 
-type preparedStmts struct {
-	markItemSeen     *sql.Stmt
-	isItemSeen       *sql.Stmt
-	getSeenItems     *sql.Stmt
-	getConfig        *sql.Stmt
-	updateConfigRun  *sql.Stmt
-	updateFeedMeta   *sql.Stmt
-	cleanupSeenItems *sql.Stmt
+// Queries holds every data operation; run them on the DB directly or inside WithTx.
+type Queries struct {
+	q querier
+}
+
+type DB struct {
+	Queries
+	conn *sql.DB
 }
 
 func Open(path string) (*DB, error) {
-	db, err := sql.Open("sqlite3", path+"?_foreign_keys=on&_journal_mode=WAL&_busy_timeout=5000")
+	conn, err := sql.Open("sqlite3", path+"?_foreign_keys=on&_journal_mode=WAL&_busy_timeout=5000")
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
 
 	// SQLite works best with single writer for WAL mode
-	db.SetMaxOpenConns(1)
-	db.SetMaxIdleConns(1)
+	conn.SetMaxOpenConns(1)
+	conn.SetMaxIdleConns(1)
 
-	if err := db.Ping(); err != nil {
+	if err := conn.Ping(); err != nil {
 		return nil, fmt.Errorf("ping database: %w", err)
 	}
 
-	store := &DB{DB: db}
-	if err := store.migrate(); err != nil {
+	db := &DB{Queries: Queries{q: conn}, conn: conn}
+	if err := db.migrate(); err != nil {
 		return nil, fmt.Errorf("migrate database: %w", err)
 	}
+	return db, nil
+}
 
-	if err := store.prepareStatements(); err != nil {
-		return nil, fmt.Errorf("prepare statements: %w", err)
+// WithTx runs fn in a transaction, committing only if fn returns nil.
+func (db *DB) WithTx(ctx context.Context, fn func(*Queries) error) error {
+	tx, err := db.conn.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
 	}
+	defer func() { _ = tx.Rollback() }()
 
-	return store, nil
+	if err := fn(&Queries{q: tx}); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (db *DB) Close() error {
+	return db.conn.Close()
+}
+
+// scanner is the shared shape of *sql.Row and *sql.Rows.
+type scanner interface {
+	Scan(dest ...any) error
+}
+
+// queryAll runs a query and scans every row with scan.
+func queryAll[T any](ctx context.Context, q querier, scan func(scanner) (*T, error), query string, args ...any) ([]*T, error) {
+	rows, err := q.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []*T
+	for rows.Next() {
+		v, err := scan(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+
+// inClause returns "?,?,..." with n placeholders.
+func inClause(n int) string {
+	return strings.TrimSuffix(strings.Repeat("?,", n), ",")
 }
 
 func (db *DB) migrate() error {
@@ -153,7 +198,7 @@ func (db *DB) migrate() error {
 	CREATE INDEX IF NOT EXISTS idx_email_sends_sent_at ON email_sends(sent_at);
 	`
 
-	if _, err := db.Exec(schema); err != nil {
+	if _, err := db.conn.Exec(schema); err != nil {
 		return err
 	}
 
@@ -172,7 +217,7 @@ var addedColumns = []struct{ table, column, decl string }{
 }
 
 func (db *DB) ensureColumn(table, column, decl string) error {
-	rows, err := db.Query(fmt.Sprintf("SELECT name FROM pragma_table_info('%s')", table))
+	rows, err := db.conn.Query(fmt.Sprintf("SELECT name FROM pragma_table_info('%s')", table))
 	if err != nil {
 		return fmt.Errorf("inspect %s: %w", table, err)
 	}
@@ -192,78 +237,8 @@ func (db *DB) ensureColumn(table, column, decl string) error {
 	}
 	_ = rows.Close()
 
-	if _, err := db.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, decl)); err != nil {
+	if _, err := db.conn.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, decl)); err != nil {
 		return fmt.Errorf("add %s.%s: %w", table, column, err)
 	}
 	return nil
-}
-
-func (db *DB) Close() error {
-	if db.stmts != nil {
-		_ = db.stmts.markItemSeen.Close()
-		_ = db.stmts.isItemSeen.Close()
-		_ = db.stmts.getSeenItems.Close()
-		_ = db.stmts.getConfig.Close()
-		_ = db.stmts.updateConfigRun.Close()
-		_ = db.stmts.updateFeedMeta.Close()
-		_ = db.stmts.cleanupSeenItems.Close()
-	}
-	return db.DB.Close()
-}
-
-func (db *DB) prepareStatements() error {
-	db.stmts = &preparedStmts{}
-
-	var err error
-
-	db.stmts.markItemSeen, err = db.Prepare(
-		`INSERT INTO seen_items (feed_id, guid, title, link) VALUES (?, ?, ?, ?)
-		 ON CONFLICT(feed_id, guid) DO UPDATE SET title = excluded.title, link = excluded.link`)
-	if err != nil {
-		return fmt.Errorf("prepare markItemSeen: %w", err)
-	}
-
-	db.stmts.isItemSeen, err = db.Prepare(
-		`SELECT id FROM seen_items WHERE feed_id = ? AND guid = ?`)
-	if err != nil {
-		return fmt.Errorf("prepare isItemSeen: %w", err)
-	}
-
-	db.stmts.getSeenItems, err = db.Prepare(
-		`SELECT id, feed_id, guid, title, link, seen_at
-		 FROM seen_items WHERE feed_id = ? ORDER BY seen_at DESC LIMIT ?`)
-	if err != nil {
-		return fmt.Errorf("prepare getSeenItems: %w", err)
-	}
-
-	db.stmts.getConfig, err = db.Prepare(
-		`SELECT id, user_id, filename, email, cron_expr, digest, inline_content, raw_text, last_run, next_run, created_at, last_active_at
-		 FROM configs WHERE user_id = ? AND filename = ?`)
-	if err != nil {
-		return fmt.Errorf("prepare getConfig: %w", err)
-	}
-
-	db.stmts.updateConfigRun, err = db.Prepare(
-		`UPDATE configs SET last_run = ?, next_run = CASE WHEN next_run IS NULL THEN NULL ELSE ? END WHERE id = ?`)
-	if err != nil {
-		return fmt.Errorf("prepare updateConfigRun: %w", err)
-	}
-
-	db.stmts.updateFeedMeta, err = db.Prepare(
-		`UPDATE feeds SET last_fetched = ?, etag = ?, last_modified = ? WHERE id = ?`)
-	if err != nil {
-		return fmt.Errorf("prepare updateFeedMeta: %w", err)
-	}
-
-	db.stmts.cleanupSeenItems, err = db.Prepare(
-		`DELETE FROM seen_items WHERE seen_at < ?`)
-	if err != nil {
-		return fmt.Errorf("prepare cleanupSeenItems: %w", err)
-	}
-
-	return nil
-}
-
-func (db *DB) BeginTx(ctx context.Context) (*sql.Tx, error) {
-	return db.DB.BeginTx(ctx, nil)
 }

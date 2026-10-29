@@ -26,16 +26,8 @@ func TestOpen(t *testing.T) {
 	}
 	defer func() { _ = db.Close() }()
 
-	if db.DB == nil {
-		t.Error("DB.DB is nil")
-	}
-	if db.stmts == nil {
-		t.Error("DB.stmts is nil")
-	}
-
-	// Verify we can query the database
 	var count int
-	err = db.QueryRow("SELECT COUNT(*) FROM users").Scan(&count)
+	err = db.q.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM users").Scan(&count)
 	if err != nil {
 		t.Errorf("failed to query users table: %v", err)
 	}
@@ -290,12 +282,11 @@ func TestMarkItemSeen(t *testing.T) {
 		t.Fatalf("MarkItemSeen failed: %v", err)
 	}
 
-	// Verify item is marked as seen
-	seen, err := db.IsItemSeen(ctx, feed.ID, "item-guid-123")
+	seen, err := db.GetSeenGUIDs(ctx, feed.ID, []string{"item-guid-123"})
 	if err != nil {
-		t.Fatalf("IsItemSeen failed: %v", err)
+		t.Fatalf("GetSeenGUIDs failed: %v", err)
 	}
-	if !seen {
+	if !seen["item-guid-123"] {
 		t.Error("expected item to be marked as seen")
 	}
 }
@@ -309,11 +300,11 @@ func TestIsItemSeen_NotSeen(t *testing.T) {
 	cfg, _ := db.CreateConfig(ctx, user.ID, "test.herald", "user@example.com", "0 8 * * *", true, false, "raw", nextRun)
 	feed, _ := db.CreateFeed(ctx, cfg.ID, "https://example.com/feed.xml", "")
 
-	seen, err := db.IsItemSeen(ctx, feed.ID, "nonexistent-guid")
+	seen, err := db.GetSeenGUIDs(ctx, feed.ID, []string{"nonexistent-guid"})
 	if err != nil {
-		t.Fatalf("IsItemSeen failed: %v", err)
+		t.Fatalf("GetSeenGUIDs failed: %v", err)
 	}
-	if seen {
+	if seen["nonexistent-guid"] {
 		t.Error("expected item to not be seen")
 	}
 }
@@ -426,7 +417,7 @@ func TestUpdateLastRunKeepsPausedConfigPaused(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.UpdateNextRun(ctx, cfg.ID, nil); err != nil {
+	if err := db.SetNextRun(ctx, cfg.ID, nil); err != nil {
 		t.Fatal(err)
 	}
 

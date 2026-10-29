@@ -14,8 +14,8 @@ type Log struct {
 	CreatedAt time.Time
 }
 
-func (db *DB) AddLog(ctx context.Context, configID int64, level, message string) error {
-	_, err := db.ExecContext(ctx,
+func (q *Queries) AddLog(ctx context.Context, configID int64, level, message string) error {
+	_, err := q.q.ExecContext(ctx,
 		`INSERT INTO logs (config_id, level, message) VALUES (?, ?, ?)`,
 		configID, level, message,
 	)
@@ -25,49 +25,21 @@ func (db *DB) AddLog(ctx context.Context, configID int64, level, message string)
 	return nil
 }
 
-func (db *DB) GetLogs(ctx context.Context, configID int64, limit int) ([]*Log, error) {
-	rows, err := db.QueryContext(ctx,
-		`SELECT id, config_id, message, level, created_at
-		 FROM logs WHERE config_id = ? ORDER BY created_at DESC LIMIT ?`,
-		configID, limit,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("query logs: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-
-	var logs []*Log
-	for rows.Next() {
-		var log Log
-		if err := rows.Scan(&log.ID, &log.ConfigID, &log.Message, &log.Level, &log.CreatedAt); err != nil {
-			return nil, fmt.Errorf("scan log: %w", err)
+func (q *Queries) GetRecentLogs(ctx context.Context, userID int64, limit int) ([]*Log, error) {
+	logs, err := queryAll(ctx, q.q, func(s scanner) (*Log, error) {
+		var l Log
+		if err := s.Scan(&l.ID, &l.ConfigID, &l.Message, &l.Level, &l.CreatedAt); err != nil {
+			return nil, err
 		}
-		logs = append(logs, &log)
-	}
-	return logs, rows.Err()
-}
-
-func (db *DB) GetRecentLogs(ctx context.Context, userID int64, limit int) ([]*Log, error) {
-	rows, err := db.QueryContext(ctx,
+		return &l, nil
+	},
 		`SELECT l.id, l.config_id, l.message, l.level, l.created_at
 		 FROM logs l
 		 JOIN configs c ON l.config_id = c.id
 		 WHERE c.user_id = ?
-		 ORDER BY l.created_at DESC LIMIT ?`,
-		userID, limit,
-	)
+		 ORDER BY l.created_at DESC LIMIT ?`, userID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("query recent logs: %w", err)
 	}
-	defer func() { _ = rows.Close() }()
-
-	var logs []*Log
-	for rows.Next() {
-		var log Log
-		if err := rows.Scan(&log.ID, &log.ConfigID, &log.Message, &log.Level, &log.CreatedAt); err != nil {
-			return nil, fmt.Errorf("scan log: %w", err)
-		}
-		logs = append(logs, &log)
-	}
-	return logs, rows.Err()
+	return logs, nil
 }

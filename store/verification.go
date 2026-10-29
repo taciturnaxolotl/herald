@@ -2,9 +2,7 @@ package store
 
 import (
 	"context"
-	"crypto/rand"
 	"database/sql"
-	"encoding/base64"
 	"fmt"
 	"time"
 
@@ -23,9 +21,9 @@ type Verification struct {
 
 // IsEmailVerified reports whether the given user has a confirmed subscription
 // to email. Sending is gated on this.
-func (db *DB) IsEmailVerified(ctx context.Context, userID int64, email string) (bool, error) {
+func (q *Queries) IsEmailVerified(ctx context.Context, userID int64, email string) (bool, error) {
 	var verifiedAt sql.NullTime
-	err := db.QueryRowContext(ctx,
+	err := q.q.QueryRowContext(ctx,
 		`SELECT verified_at FROM verified_emails WHERE user_id = ? AND email = ?`,
 		userID, email,
 	).Scan(&verifiedAt)
@@ -45,14 +43,14 @@ const VerifyTokenTTL = 7 * 24 * time.Hour
 // creating a pending one if none exists. A pending token past half its TTL is
 // rotated so a resent link is never already dead; verified rows are returned
 // unchanged.
-func (db *DB) EnsurePendingVerification(ctx context.Context, userID int64, email string) (*Verification, error) {
-	token, err := generateToken()
+func (q *Queries) EnsurePendingVerification(ctx context.Context, userID int64, email string) (*Verification, error) {
+	token, err := NewToken()
 	if err != nil {
 		return nil, err
 	}
 	now := time.Now().UTC()
 
-	_, err = db.ExecContext(ctx,
+	_, err = q.q.ExecContext(ctx,
 		`INSERT INTO verified_emails (user_id, email, token, token_created_at)
 		 VALUES (?, ?, ?, ?)
 		 ON CONFLICT(user_id, email) DO UPDATE SET token = excluded.token, token_created_at = excluded.token_created_at
@@ -63,12 +61,12 @@ func (db *DB) EnsurePendingVerification(ctx context.Context, userID int64, email
 	if err != nil {
 		return nil, fmt.Errorf("upsert verification: %w", err)
 	}
-	return db.getVerification(ctx, userID, email)
+	return q.getVerification(ctx, userID, email)
 }
 
-func (db *DB) getVerification(ctx context.Context, userID int64, email string) (*Verification, error) {
+func (q *Queries) getVerification(ctx context.Context, userID int64, email string) (*Verification, error) {
 	var v Verification
-	err := db.QueryRowContext(ctx,
+	err := q.q.QueryRowContext(ctx,
 		`SELECT id, user_id, email, verified_at, token, last_sent_at
 		 FROM verified_emails WHERE user_id = ? AND email = ?`,
 		userID, email,
@@ -81,10 +79,10 @@ func (db *DB) getVerification(ctx context.Context, userID int64, email string) (
 
 // GetVerificationByToken looks up a pending verification by its confirmation
 // token, rejecting tokens older than maxAge.
-func (db *DB) GetVerificationByToken(ctx context.Context, token string, maxAge time.Duration) (*Verification, error) {
+func (q *Queries) GetVerificationByToken(ctx context.Context, token string, maxAge time.Duration) (*Verification, error) {
 	var v Verification
 	var tokenCreated sql.NullTime
-	err := db.QueryRowContext(ctx,
+	err := q.q.QueryRowContext(ctx,
 		`SELECT id, user_id, email, verified_at, token, last_sent_at, token_created_at
 		 FROM verified_emails WHERE token = ?`,
 		token,
@@ -99,8 +97,8 @@ func (db *DB) GetVerificationByToken(ctx context.Context, token string, maxAge t
 }
 
 // MarkEmailVerified confirms a verification and clears its (now spent) token.
-func (db *DB) MarkEmailVerified(ctx context.Context, id int64) error {
-	_, err := db.ExecContext(ctx,
+func (q *Queries) MarkEmailVerified(ctx context.Context, id int64) error {
+	_, err := q.q.ExecContext(ctx,
 		`UPDATE verified_emails SET verified_at = ?, token = NULL WHERE id = ?`,
 		time.Now().UTC(), id,
 	)
@@ -112,8 +110,8 @@ func (db *DB) MarkEmailVerified(ctx context.Context, id int64) error {
 
 // MarkConfirmationSent records that a confirmation email was just sent, for the
 // per-address cooldown.
-func (db *DB) MarkConfirmationSent(ctx context.Context, id int64, when time.Time) error {
-	_, err := db.ExecContext(ctx,
+func (q *Queries) MarkConfirmationSent(ctx context.Context, id int64, when time.Time) error {
+	_, err := q.q.ExecContext(ctx,
 		`UPDATE verified_emails SET last_sent_at = ? WHERE id = ?`,
 		when.UTC(), id,
 	)
@@ -126,11 +124,11 @@ func (db *DB) MarkConfirmationSent(ctx context.Context, id int64, when time.Time
 // LastConfirmationToEmail returns the most recent time a confirmation was sent
 // to email, across all users. This backs the global per-address cooldown, so
 // several attackers cannot each prompt the same victim.
-func (db *DB) LastConfirmationToEmail(ctx context.Context, email string) (sql.NullTime, error) {
+func (q *Queries) LastConfirmationToEmail(ctx context.Context, email string) (sql.NullTime, error) {
 	// Select the bare column (not MAX) so the sqlite driver keeps DATETIME type
 	// affinity and scans into time.Time; an aggregate returns it as a string.
 	var last sql.NullTime
-	err := db.QueryRowContext(ctx,
+	err := q.q.QueryRowContext(ctx,
 		`SELECT last_sent_at FROM verified_emails
 		 WHERE email = ? AND last_sent_at IS NOT NULL
 		 ORDER BY last_sent_at DESC LIMIT 1`,
@@ -148,8 +146,8 @@ func (db *DB) LastConfirmationToEmail(ctx context.Context, email string) (sql.Nu
 // ActivateConfigsForEmail schedules every config the user owns that targets
 // email, by computing each one's next run from its cron expression. Called
 // once the address is verified.
-func (db *DB) ActivateConfigsForEmail(ctx context.Context, userID int64, email string) error {
-	rows, err := db.QueryContext(ctx,
+func (q *Queries) ActivateConfigsForEmail(ctx context.Context, userID int64, email string) error {
+	rows, err := q.q.QueryContext(ctx,
 		`SELECT id, cron_expr FROM configs WHERE user_id = ? AND email = ?`,
 		userID, email,
 	)
@@ -180,7 +178,7 @@ func (db *DB) ActivateConfigsForEmail(ctx context.Context, userID int64, email s
 		if err != nil {
 			continue // leave a config with a bad cron inactive
 		}
-		if err := db.UpdateNextRun(ctx, p.id, &nextRun); err != nil {
+		if err := q.SetNextRun(ctx, p.id, &nextRun); err != nil {
 			return fmt.Errorf("activate config %d: %w", p.id, err)
 		}
 	}
@@ -192,39 +190,34 @@ func (db *DB) ActivateConfigsForEmail(ctx context.Context, userID int64, email s
 // tables do not accumulate junk from abandoned or abusive uploads.
 func (db *DB) DeleteStalePendingVerifications(ctx context.Context, maxAge time.Duration) (int64, error) {
 	cutoff := time.Now().UTC().Add(-maxAge)
+	var n int64
+	err := db.WithTx(ctx, func(q *Queries) error {
+		// Delete inactive configs whose (user, email) is still unverified and whose
+		// verification attempt has aged out.
+		if _, err := q.q.ExecContext(ctx,
+			`DELETE FROM configs
+			 WHERE next_run IS NULL
+			   AND EXISTS (
+			     SELECT 1 FROM verified_emails v
+			     WHERE v.user_id = configs.user_id AND v.email = configs.email
+			       AND v.verified_at IS NULL
+			       AND COALESCE(v.token_created_at, v.created_at) < ?
+			   )`,
+			cutoff,
+		); err != nil {
+			return fmt.Errorf("delete stale configs: %w", err)
+		}
 
-	// Delete inactive configs whose (user, email) is still unverified and whose
-	// verification attempt has aged out.
-	if _, err := db.ExecContext(ctx,
-		`DELETE FROM configs
-		 WHERE next_run IS NULL
-		   AND EXISTS (
-		     SELECT 1 FROM verified_emails v
-		     WHERE v.user_id = configs.user_id AND v.email = configs.email
-		       AND v.verified_at IS NULL
-		       AND COALESCE(v.token_created_at, v.created_at) < ?
-		   )`,
-		cutoff,
-	); err != nil {
-		return 0, fmt.Errorf("delete stale configs: %w", err)
-	}
-
-	res, err := db.ExecContext(ctx,
-		`DELETE FROM verified_emails
-		 WHERE verified_at IS NULL AND COALESCE(token_created_at, created_at) < ?`,
-		cutoff,
-	)
-	if err != nil {
-		return 0, fmt.Errorf("delete stale verifications: %w", err)
-	}
-	n, _ := res.RowsAffected()
-	return n, nil
-}
-
-func generateToken() (string, error) {
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		return "", fmt.Errorf("generate token: %w", err)
-	}
-	return base64.RawURLEncoding.EncodeToString(b), nil
+		res, err := q.q.ExecContext(ctx,
+			`DELETE FROM verified_emails
+			 WHERE verified_at IS NULL AND COALESCE(token_created_at, created_at) < ?`,
+			cutoff,
+		)
+		if err != nil {
+			return fmt.Errorf("delete stale verifications: %w", err)
+		}
+		n, _ = res.RowsAffected()
+		return nil
+	})
+	return n, err
 }

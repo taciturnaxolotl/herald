@@ -211,7 +211,7 @@ func (s *Scheduler) cleanupOldEmailSends(ctx context.Context) {
 		}
 	}()
 
-	deleted, err := s.store.CleanupOldSends(emailSendsRetention)
+	deleted, err := s.store.CleanupOldSends(ctx, emailSendsRetention)
 	if err != nil {
 		s.logger.Error("failed to cleanup old email sends", "err", err)
 		return
@@ -245,7 +245,7 @@ func (s *Scheduler) checkAndDeactivateInactiveConfigs(ctx context.Context) {
 		}
 	}()
 
-	inactiveConfigs, err := s.store.GetInactiveConfigs(inactivityThreshold, minSendsBeforeDeactivate)
+	inactiveConfigs, err := s.store.GetInactiveConfigs(ctx, inactivityThreshold, minSendsBeforeDeactivate)
 	if err != nil {
 		s.logger.Error("failed to get inactive configs", "err", err)
 		return
@@ -270,7 +270,7 @@ func (s *Scheduler) checkAndDeactivateInactiveConfigs(ctx context.Context) {
 		}
 
 		// Deactivate by setting next_run to NULL
-		if err := s.store.UpdateNextRun(ctx, configID, nil); err != nil {
+		if err := s.store.SetNextRun(ctx, configID, nil); err != nil {
 			s.logger.Error("failed to deactivate inactive config", "config_id", configID, "err", err)
 			continue
 		}
@@ -464,7 +464,7 @@ func (s *Scheduler) sendDigestAndMarkSeen(ctx context.Context, cfg *store.Config
 		return fmt.Errorf("check verified: %w", err)
 	}
 	if !verified {
-		if err := s.store.UpdateNextRun(ctx, cfg.ID, nil); err != nil {
+		if err := s.store.SetNextRun(ctx, cfg.ID, nil); err != nil {
 			s.logger.Warn("failed to deactivate unverified config", "config_id", cfg.ID, "err", err)
 		}
 		_ = s.store.AddLog(ctx, cfg.ID, "error", "Held: "+cfg.Email+" is not verified. Run `verify "+cfg.Filename+"` over SSH to get a new confirmation link.")
@@ -524,63 +524,41 @@ func (s *Scheduler) sendDigestAndMarkSeen(ctx context.Context, cfg *store.Config
 	}
 	s.logger.Debug("sendDigestAndMarkSeen: rate limit ok")
 
-	// Begin transaction to mark items seen
-	tx, err := s.store.BeginTx(ctx)
-	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	s.logger.Debug("sendDigestAndMarkSeen: transaction started")
-
-	// Mark items seen BEFORE sending email
-	for _, result := range results {
-		if result.Error != nil {
-			continue
-		}
-		for _, item := range result.Items {
-			if err := s.store.MarkItemSeenTx(ctx, tx, result.FeedID, item.GUID, item.Title, item.Link); err != nil {
-				s.logger.Warn("failed to mark item seen", "err", err)
-			}
-		}
-	}
-	s.logger.Debug("sendDigestAndMarkSeen: items marked seen")
-
 	// Generate tracking token BEFORE recording (needed for keep-alive URL)
-	trackingToken, err := s.store.GenerateTrackingToken()
+	trackingToken, err := store.NewToken()
 	if err != nil {
 		s.logger.Warn("failed to generate tracking token", "err", err)
 		trackingToken = ""
 	}
-	s.logger.Debug("sendDigestAndMarkSeen: generated tracking token")
-
-	// Record email send with tracking (within transaction)
 	subject := email.DigestSubject(digestData)
-	s.logger.Debug("sendDigestAndMarkSeen: recording email send")
-	if err := s.store.RecordEmailSendTx(tx, cfg.ID, cfg.Email, subject, trackingToken); err != nil {
-		s.logger.Warn("failed to record email send", "err", err)
-	}
-	s.logger.Debug("sendDigestAndMarkSeen: recorded email send")
 
-	// Build keep-alive URL
 	keepAliveURL := ""
 	if trackingToken != "" {
 		keepAliveURL = s.originURL + "/keep-alive/" + trackingToken
 	}
 
-	// Send email - if this fails, transaction will rollback
-	s.logger.Debug("sendDigestAndMarkSeen: calling mailer.Send", "to", cfg.Email)
-	if err := s.mailer.Send(cfg.Email, subject, htmlBody, textBody, unsubToken, dashboardURL, keepAliveURL); err != nil {
-		s.logger.Error("sendDigestAndMarkSeen: mailer.Send failed", "err", err)
-		return fmt.Errorf("send email: %w", err)
-	}
-	s.logger.Debug("sendDigestAndMarkSeen: mailer.Send returned successfully")
+	// Stage seen-marks and the send record, then commit only if the send succeeds.
+	return s.store.WithTx(ctx, func(q *store.Queries) error {
+		for _, result := range results {
+			if result.Error != nil {
+				continue
+			}
+			for _, item := range result.Items {
+				if err := q.MarkItemSeen(ctx, result.FeedID, item.GUID, item.Title, item.Link); err != nil {
+					s.logger.Warn("failed to mark item seen", "err", err)
+				}
+			}
+		}
+		if err := q.RecordEmailSend(ctx, cfg.ID, cfg.Email, subject, trackingToken); err != nil {
+			s.logger.Warn("failed to record email send", "err", err)
+		}
 
-	// Commit transaction only after successful email send
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit transaction: %w", err)
-	}
-
-	return nil
+		if err := s.mailer.Send(cfg.Email, subject, htmlBody, textBody, unsubToken, dashboardURL, keepAliveURL); err != nil {
+			s.logger.Error("sendDigestAndMarkSeen: mailer.Send failed", "err", err)
+			return fmt.Errorf("send email: %w", err)
+		}
+		return nil
+	})
 }
 
 func (s *Scheduler) processConfig(ctx context.Context, cfg *store.Config) error {

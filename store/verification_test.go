@@ -46,7 +46,7 @@ func TestVerificationLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create config: %v", err)
 	}
-	if err := db.DeactivateConfig(ctx, cfg.ID); err != nil {
+	if err := db.SetNextRun(ctx, cfg.ID, nil); err != nil {
 		t.Fatalf("deactivate: %v", err)
 	}
 
@@ -114,7 +114,7 @@ func TestDeleteStalePendingVerifications(t *testing.T) {
 
 	// An aged pending row (backdated created_at) must be swept.
 	old := time.Now().UTC().Add(-72 * time.Hour)
-	if _, err := db.ExecContext(ctx,
+	if _, err := db.q.ExecContext(ctx,
 		`INSERT INTO verified_emails (user_id, email, token, token_created_at, created_at)
 		 VALUES (?, ?, ?, ?, ?)`,
 		user.ID, "stale@example.com", "stale-token", old, old,
@@ -155,7 +155,7 @@ func TestEnsurePendingVerificationRotatesAgingToken(t *testing.T) {
 	}
 
 	old := time.Now().UTC().Add(-(VerifyTokenTTL - time.Hour))
-	if _, err := db.ExecContext(ctx, `UPDATE verified_emails SET token_created_at = ? WHERE id = ?`, old, first.ID); err != nil {
+	if _, err := db.q.ExecContext(ctx, `UPDATE verified_emails SET token_created_at = ? WHERE id = ?`, old, first.ID); err != nil {
 		t.Fatal(err)
 	}
 	rotated, err := db.EnsurePendingVerification(ctx, user.ID, "a@example.com")

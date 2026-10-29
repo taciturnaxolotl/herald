@@ -2,68 +2,46 @@ package store
 
 import (
 	"context"
-	"crypto/rand"
 	"database/sql"
-	"encoding/base64"
+	"errors"
 	"fmt"
 )
 
-func (db *DB) CreateUnsubscribeToken(ctx context.Context, configID int64) (string, error) {
-	// Generate random token
-	tokenBytes := make([]byte, 32)
-	if _, err := rand.Read(tokenBytes); err != nil {
-		return "", fmt.Errorf("generate token: %w", err)
-	}
-	token := base64.RawURLEncoding.EncodeToString(tokenBytes)
-
-	_, err := db.ExecContext(ctx,
-		`INSERT INTO unsubscribe_tokens (token, config_id) VALUES (?, ?)`,
-		token, configID,
-	)
-	if err != nil {
-		return "", fmt.Errorf("insert token: %w", err)
-	}
-
-	return token, nil
-}
-
-func (db *DB) GetConfigByToken(ctx context.Context, token string) (*Config, error) {
+func (q *Queries) GetConfigByToken(ctx context.Context, token string) (*Config, error) {
 	var configID int64
-	err := db.QueryRowContext(ctx,
-		`SELECT config_id FROM unsubscribe_tokens WHERE token = ?`,
-		token,
-	).Scan(&configID)
-	if err != nil {
+	if err := q.q.QueryRowContext(ctx,
+		`SELECT config_id FROM unsubscribe_tokens WHERE token = ?`, token,
+	).Scan(&configID); err != nil {
 		return nil, err
 	}
-
-	return db.GetConfigByID(ctx, configID)
+	return q.GetConfigByID(ctx, configID)
 }
 
-func (db *DB) DeleteToken(ctx context.Context, token string) error {
-	_, err := db.ExecContext(ctx,
-		`DELETE FROM unsubscribe_tokens WHERE token = ?`,
-		token,
-	)
+func (q *Queries) DeleteToken(ctx context.Context, token string) error {
+	_, err := q.q.ExecContext(ctx, `DELETE FROM unsubscribe_tokens WHERE token = ?`, token)
 	return err
 }
 
-func (db *DB) GetOrCreateUnsubscribeToken(ctx context.Context, configID int64) (string, error) {
-	// Check if token already exists
+func (q *Queries) GetOrCreateUnsubscribeToken(ctx context.Context, configID int64) (string, error) {
 	var token string
-	err := db.QueryRowContext(ctx,
-		`SELECT token FROM unsubscribe_tokens WHERE config_id = ? LIMIT 1`,
-		configID,
+	err := q.q.QueryRowContext(ctx,
+		`SELECT token FROM unsubscribe_tokens WHERE config_id = ? LIMIT 1`, configID,
 	).Scan(&token)
-
 	if err == nil {
 		return token, nil
 	}
-
-	if err != sql.ErrNoRows {
+	if !errors.Is(err, sql.ErrNoRows) {
 		return "", err
 	}
 
-	// Create new token
-	return db.CreateUnsubscribeToken(ctx, configID)
+	token, err = NewToken()
+	if err != nil {
+		return "", err
+	}
+	if _, err := q.q.ExecContext(ctx,
+		`INSERT INTO unsubscribe_tokens (token, config_id) VALUES (?, ?)`, token, configID,
+	); err != nil {
+		return "", fmt.Errorf("insert token: %w", err)
+	}
+	return token, nil
 }

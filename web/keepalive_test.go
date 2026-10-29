@@ -32,8 +32,11 @@ func TestKeepAliveOnlyRenewsOnPost(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	token, err := st.RecordEmailSend(cfg.ID, "a@example.com", "subject", true)
+	token, err := store.NewToken()
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.RecordEmailSend(ctx, cfg.ID, "a@example.com", "subject", token); err != nil {
 		t.Fatal(err)
 	}
 
