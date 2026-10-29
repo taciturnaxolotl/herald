@@ -84,6 +84,18 @@ func (db *DB) GetUserByID(ctx context.Context, userID int64) (*User, error) {
 }
 
 func (db *DB) DeleteUser(ctx context.Context, userID int64) error {
-	_, err := db.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, userID)
-	return err
+	tx, err := db.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// configs.user_id has no ON DELETE CASCADE, so configs must go first.
+	if _, err := tx.ExecContext(ctx, `DELETE FROM configs WHERE user_id = ?`, userID); err != nil {
+		return fmt.Errorf("delete configs: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, userID); err != nil {
+		return fmt.Errorf("delete user: %w", err)
+	}
+	return tx.Commit()
 }

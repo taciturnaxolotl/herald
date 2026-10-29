@@ -116,8 +116,15 @@ func TestDeleteUser(t *testing.T) {
 	ctx := context.Background()
 
 	user, _ := db.GetOrCreateUser(ctx, "test-fp", "test-pubkey")
+	cfg, err := db.CreateConfig(ctx, user.ID, "a.txt", "user@example.com", "0 8 * * *", true, false, "raw", time.Now())
+	if err != nil {
+		t.Fatalf("CreateConfig failed: %v", err)
+	}
+	if _, err := db.CreateFeed(ctx, cfg.ID, "https://example.com/feed.xml", ""); err != nil {
+		t.Fatalf("CreateFeed failed: %v", err)
+	}
 
-	err := db.DeleteUser(ctx, user.ID)
+	err = db.DeleteUser(ctx, user.ID)
 	if err != nil {
 		t.Fatalf("DeleteUser failed: %v", err)
 	}
@@ -125,6 +132,9 @@ func TestDeleteUser(t *testing.T) {
 	_, err = db.GetUserByID(ctx, user.ID)
 	if err != sql.ErrNoRows {
 		t.Errorf("expected sql.ErrNoRows after delete, got %v", err)
+	}
+	if _, err := db.GetConfigByID(ctx, cfg.ID); err != sql.ErrNoRows {
+		t.Errorf("expected config deleted with user, got %v", err)
 	}
 }
 
