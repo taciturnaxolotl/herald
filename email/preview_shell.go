@@ -66,10 +66,6 @@ const gmailShellTemplate = `<!DOCTYPE html>
   }
   .gmail-body {
     padding: 0 24px 24px 24px;
-    /* Gmail strips <head>/<style>/<body> from the original email, keeping
-       only the body content. The style block moves inline but Gmail scopes
-       all class names. For preview we just inject the digest HTML as-is
-       since browsers apply <style> correctly. */
   }
   .gmail-body img {
     max-width: 100%;
@@ -113,28 +109,21 @@ var (
 	gmailUnwrapBody = regexp.MustCompile(`(?s)<body[^>]*>(.*)</body>\s*</html>`)
 )
 
-// WrapForGMailPreview takes a full HTML digest document and wraps it in a
-// Gmail shell for realistic preview rendering.
-func WrapForGMailPreview(digestHTML, subject string) (string, error) {
-	// Strip <html>/<head>/<body> wrapping as Gmail does
-	body := digestHTML
-	body = gmailUnwrapHead.ReplaceAllString(body, "")
-	body = gmailUnwrapBody.ReplaceAllString(body, "$1")
-	body = strings.TrimSpace(body)
+var gmailShell = template.Must(template.New("gmail-shell").Parse(gmailShellTemplate))
 
-	tmpl, err := template.New("gmail-shell").Parse(gmailShellTemplate)
-	if err != nil {
-		return "", err
-	}
+// WrapForGmailPreview strips the digest's <head> and wrappers, as Gmail does
+// (so its <style> block is dropped too), and frames it like a Gmail message.
+func WrapForGmailPreview(digestHTML, subject string) (string, error) {
+	body := gmailUnwrapHead.ReplaceAllString(digestHTML, "")
+	body = strings.TrimSpace(gmailUnwrapBody.ReplaceAllString(body, "$1"))
 
 	var buf bytes.Buffer
-	err = tmpl.Execute(&buf, map[string]any{
-		"Subject":  subject,
-		"BodyHTML": template.HTML(body), // #nosec G203 — content is already sanitized
-	})
+	err := gmailShell.Execute(&buf, struct {
+		Subject  string
+		BodyHTML template.HTML
+	}{subject, template.HTML(body)}) // #nosec G203 -- content is already sanitized
 	if err != nil {
 		return "", err
 	}
-
 	return buf.String(), nil
 }

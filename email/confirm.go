@@ -3,6 +3,7 @@ package email
 import (
 	htmltemplate "html/template"
 	"strings"
+	texttemplate "text/template"
 )
 
 // confirmTextTmpl and confirmHTMLTmpl are fixed templates. The ONLY dynamic
@@ -10,7 +11,7 @@ import (
 // (server-built). No user-supplied strings -- filenames, feed titles, config
 // text -- are ever interpolated, so the confirmation email cannot be used to
 // smuggle attacker content to the recipient.
-const confirmTextTmpl = `Someone asked Herald to send an email digest to this address.
+var confirmTextTmpl = texttemplate.Must(texttemplate.New("confirm").Parse(`Someone asked Herald to send an email digest to this address.
 
 Request from SSH key:
   {{.Fingerprint}}
@@ -22,7 +23,7 @@ If you did not set this up, ignore this email. Nothing will be sent unless
 you confirm, and this request expires on its own.
 
 -- Herald
-`
+`))
 
 var confirmHTMLTmpl = htmltemplate.Must(htmltemplate.New("confirm").Parse(`<p>Someone asked Herald to send an email digest to this address.</p>
 <p>Request from SSH key:<br><code>{{.Fingerprint}}</code></p>
@@ -45,17 +46,11 @@ func (m *Mailer) SendVerification(to, fingerprint, verifyURL string) error {
 		return err
 	}
 
-	textBody := confirmTextTmpl
-	textBody = strings.ReplaceAll(textBody, "{{.Fingerprint}}", fingerprint)
-	textBody = strings.ReplaceAll(textBody, "{{.URL}}", verifyURL)
-
-	// Transactional, not bulk: mark as auto-generated so it is not treated as
-	// list mail, and omit List-Unsubscribe (there is nothing to unsubscribe
-	// from yet).
-	extraHeaders := map[string]string{
-		"Auto-Submitted": "auto-generated",
-		"Reply-To":       m.fromAddress(),
+	var textBuf strings.Builder
+	if err := confirmTextTmpl.Execute(&textBuf, data); err != nil {
+		return err
 	}
 
-	return m.deliver(to, "Confirm your Herald subscription", htmlBuf.String(), textBody, extraHeaders)
+	// Transactional, not list mail, so no list headers: there is nothing to unsubscribe from yet.
+	return m.deliver(to, "Confirm your Herald subscription", htmlBuf.String(), textBuf.String(), nil)
 }

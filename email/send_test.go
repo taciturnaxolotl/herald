@@ -67,3 +67,30 @@ func TestNewMailerRejectsUnusableDKIMKey(t *testing.T) {
 		t.Fatalf("a .env style key should load, got %v", err)
 	}
 }
+
+func TestBuildMessageHeaders(t *testing.T) {
+	m, err := NewMailer(SMTPConfig{From: "herald@example.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg := string(m.buildMessage("a@example.com", "Hi", "<p>x</p>", "x", []header{{"List-Post", "NO"}}))
+	head := msg[:strings.Index(msg, "\r\n\r\n")]
+	for _, want := range []string{"From: \"Herald\" <herald@example.com>", "Auto-Submitted: auto-generated", "Reply-To: herald@example.com", "List-Post: NO"} {
+		if !strings.Contains(head, want) {
+			t.Errorf("headers missing %q:\n%s", want, head)
+		}
+	}
+	if strings.Index(head, "Reply-To") > strings.Index(head, "List-Post") {
+		t.Error("extra headers should follow the base set")
+	}
+}
+
+func TestConfirmationTextFillsIn(t *testing.T) {
+	var b strings.Builder
+	if err := confirmTextTmpl.Execute(&b, confirmData{Fingerprint: "SHA256:abc", URL: "https://herald.test/verify/t"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(b.String(), "SHA256:abc") || !strings.Contains(b.String(), "https://herald.test/verify/t") {
+		t.Errorf("confirmation text missing values:\n%s", b.String())
+	}
+}

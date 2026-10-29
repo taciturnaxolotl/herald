@@ -15,7 +15,6 @@ import (
 	"net/mail"
 	"net/smtp"
 	"os"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -175,36 +174,44 @@ func (m *Mailer) transmit(to string, msg []byte) error {
 // and they also drive the RFC 2369 list headers.
 func (m *Mailer) Send(to, subject, htmlBody, textBody string, links DigestLinks) error {
 	from := m.fromAddress()
-	extraHeaders := map[string]string{
-		"Auto-Submitted":   "auto-generated",
-		"List-Id":          fmt.Sprintf("<herald.%s>", senderDomain(from)),
-		"List-Post":        "NO",
-		"Precedence":       "bulk",
-		"Reply-To":         from,
-		"X-MC-MailingList": from,
+	headers := []header{
+		{"List-Id", fmt.Sprintf("<herald.%s>", senderDomain(from))},
+		{"List-Post", "NO"},
 	}
 	if links.Dashboard != "" {
-		extraHeaders["List-Archive"] = fmt.Sprintf("<%s>", links.Dashboard)
+		headers = append(headers, header{"List-Archive", fmt.Sprintf("<%s>", links.Dashboard)})
 	}
 	// RFC 8058 one-click unsubscribe.
 	if links.Unsubscribe != "" {
-		extraHeaders["List-Unsubscribe"] = fmt.Sprintf("<%s>", links.Unsubscribe)
-		extraHeaders["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
+		headers = append(headers,
+			header{"List-Unsubscribe", fmt.Sprintf("<%s>", links.Unsubscribe)},
+			header{"List-Unsubscribe-Post", "List-Unsubscribe=One-Click"})
 	}
+	headers = append(headers, header{"Precedence", "bulk"}, header{"X-MC-MailingList", from})
 
-	return m.deliver(to, subject, htmlBody, textBody, extraHeaders)
+	return m.deliver(to, subject, htmlBody, textBody, headers)
 }
 
-// deliver assembles a signed multipart/alternative message and sends it. It is
-// the shared path for digests and confirmation emails; callers supply any
-// headers beyond the base set.
-func (m *Mailer) deliver(to, subject, htmlBody, textBody string, extraHeaders map[string]string) error {
+type header struct{ key, value string }
+
+// deliver assembles a signed multipart/alternative message and sends it, for
+// digests and confirmations alike; extra headers follow the base set in order.
+func (m *Mailer) deliver(to, subject, htmlBody, textBody string, extra []header) error {
+	msg := m.buildMessage(to, subject, htmlBody, textBody, extra)
+	if m.dkimKey != nil {
+		signed, err := m.signDKIM(msg)
+		if err != nil {
+			return fmt.Errorf("DKIM signing: %w", err)
+		}
+		msg = signed
+	}
+	return m.transmit(to, msg)
+}
+
+func (m *Mailer) buildMessage(to, subject, htmlBody, textBody string, extra []header) []byte {
 	boundary := "==herald-" + generateMessageIDToken() + "=="
 
-	// Fixed-order base headers for reproducible output. Real MUAs emit a
-	// stable conventional order; per-message shuffling is an anomaly that
-	// content filters notice.
-	type header struct{ key, value string }
+	// A stable conventional header order, since per-message shuffling is an anomaly filters notice.
 	base := []header{
 		{"From", m.fromHeader()},
 		{"To", to},
@@ -213,21 +220,13 @@ func (m *Mailer) deliver(to, subject, htmlBody, textBody string, extraHeaders ma
 		{"Message-ID", fmt.Sprintf("<%d.%s@%s>", time.Now().Unix(), generateMessageIDToken(), senderDomain(m.fromAddress()))},
 		{"MIME-Version", "1.0"},
 		{"Content-Type", fmt.Sprintf("multipart/alternative; boundary=%q", boundary)},
+		{"Auto-Submitted", "auto-generated"},
+		{"Reply-To", m.fromAddress()},
 	}
 
 	var msg strings.Builder
-	for _, h := range base {
+	for _, h := range append(base, extra...) {
 		fmt.Fprintf(&msg, "%s: %s\r\n", h.key, h.value)
-	}
-
-	// Extra headers in sorted order for determinism.
-	extraKeys := make([]string, 0, len(extraHeaders))
-	for k := range extraHeaders {
-		extraKeys = append(extraKeys, k)
-	}
-	sort.Strings(extraKeys)
-	for _, k := range extraKeys {
-		fmt.Fprintf(&msg, "%s: %s\r\n", k, extraHeaders[k])
 	}
 	msg.WriteString("\r\n")
 
@@ -244,19 +243,7 @@ func (m *Mailer) deliver(to, subject, htmlBody, textBody string, extraHeaders ma
 	msg.WriteString("\r\n")
 
 	fmt.Fprintf(&msg, "--%s--\r\n", boundary)
-
-	messageBytes := []byte(msg.String())
-
-	// Sign with DKIM if configured
-	if m.dkimKey != nil {
-		signed, err := m.signDKIM(messageBytes)
-		if err != nil {
-			return fmt.Errorf("DKIM signing: %w", err)
-		}
-		messageBytes = signed
-	}
-
-	return m.transmit(to, messageBytes)
+	return []byte(msg.String())
 }
 
 // fromAddress returns the bare address of the configured sender, which may be

@@ -155,7 +155,7 @@ func runPreview(ctx context.Context, feedURL, outputFile string, inline bool) er
 		return fmt.Errorf("render digest: %w", err)
 	}
 
-	gmailOutput, err := email.WrapForGMailPreview(htmlOutput, email.DigestSubject(data))
+	gmailOutput, err := email.WrapForGmailPreview(htmlOutput, email.DigestSubject(data))
 	if err != nil {
 		return fmt.Errorf("gmail wrap: %w", err)
 	}
