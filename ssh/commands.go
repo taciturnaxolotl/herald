@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"charm.land/lipgloss/v2"
-	"charm.land/log/v2"
 	"charm.land/ssh"
 	"github.com/taciturnaxolotl/herald/scheduler"
 	"github.com/taciturnaxolotl/herald/store"
@@ -17,330 +16,270 @@ import (
 )
 
 var (
-	titleStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("12"))
-
-	dimStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("8"))
-
-	successStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("10"))
-
-	errorStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("9"))
+	titleStyle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
+	dimStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	successStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
+	errorStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
 )
 
-// print writes to the session, ignoring errors (connection drops are expected)
-func print(w io.Writer, args ...interface{}) {
-	_, _ = fmt.Fprint(w, args...)
+// out and outf write to the session, ignoring errors since dropped connections are expected.
+func out(w io.Writer, args ...any) { _, _ = fmt.Fprintln(w, args...) }
+
+func outf(w io.Writer, format string, args ...any) { _, _ = fmt.Fprintf(w, format, args...) }
+
+// cmdCtx is everything a command runs with.
+type cmdCtx struct {
+	ctx      context.Context
+	sess     ssh.Session
+	user     *store.User
+	store    *store.DB
+	sched    *scheduler.Scheduler
+	verifier *verify.Service
 }
 
-// printf writes formatted output to the session, ignoring errors
-func printf(w io.Writer, format string, args ...interface{}) {
-	_, _ = fmt.Fprintf(w, format, args...)
+type command struct {
+	name, arg, help string
+	run             func(c *cmdCtx, arg string)
 }
 
-// println writes a line to the session, ignoring errors
-func println(w io.Writer, args ...interface{}) {
-	_, _ = fmt.Fprintln(w, args...)
+// commands is the single list behind dispatch, usage errors and the help text.
+var commands = []command{
+	{"ls", "", "List your configs", runLs},
+	{"cat", "<file>", "Show config contents", runCat},
+	{"rm", "<file>", "Delete a config", runRm},
+	{"activate", "<file>", "Enable a config", runActivate},
+	{"deactivate", "<file>", "Disable a config", runDeactivate},
+	{"run", "<file>", "Run a config now", runRun},
+	{"verify", "<file>", "Resend the email confirmation", runVerify},
+	{"logs", "", "Show recent activity", runLogs},
 }
 
-func HandleCommand(sess ssh.Session, user *store.User, st *store.DB, sched *scheduler.Scheduler, verifier *verify.Service, logger *log.Logger) {
-	cmd := sess.Command()
-	if len(cmd) == 0 {
+func commandHelp() string {
+	var b strings.Builder
+	for _, cmd := range commands {
+		fmt.Fprintf(&b, "  %-20s %s\n", strings.TrimSpace(cmd.name+" "+cmd.arg), cmd.help)
+	}
+	return b.String()
+}
+
+func runCommand(c *cmdCtx, args []string) {
+	for _, cmd := range commands {
+		if cmd.name != args[0] {
+			continue
+		}
+		arg := ""
+		if cmd.arg != "" {
+			if len(args) < 2 {
+				out(c.sess, errorStyle.Render("Usage: "+cmd.name+" "+cmd.arg))
+				return
+			}
+			arg = args[1]
+		}
+		cmd.run(c, arg)
 		return
 	}
-
-	ctx := context.Background()
-
-	switch cmd[0] {
-	case "ls":
-		handleLs(ctx, sess, user, st)
-	case "cat":
-		if len(cmd) < 2 {
-			println(sess, errorStyle.Render("Usage: cat <filename>"))
-			return
-		}
-		handleCat(ctx, sess, user, st, cmd[1])
-	case "rm":
-		if len(cmd) < 2 {
-			println(sess, errorStyle.Render("Usage: rm <filename>"))
-			return
-		}
-		handleRm(ctx, sess, user, st, cmd[1])
-	case "activate":
-		if len(cmd) < 2 {
-			println(sess, errorStyle.Render("Usage: activate <filename>"))
-			return
-		}
-		handleActivate(ctx, sess, user, st, cmd[1])
-	case "deactivate":
-		if len(cmd) < 2 {
-			println(sess, errorStyle.Render("Usage: deactivate <filename>"))
-			return
-		}
-		handleDeactivate(ctx, sess, user, st, cmd[1])
-	case "run":
-		if len(cmd) < 2 {
-			println(sess, errorStyle.Render("Usage: run <filename>"))
-			return
-		}
-		handleRun(ctx, sess, user, st, sched, cmd[1])
-	case "verify":
-		if len(cmd) < 2 {
-			println(sess, errorStyle.Render("Usage: verify <filename>"))
-			return
-		}
-		handleVerify(ctx, sess, user, st, verifier, cmd[1])
-	case "logs":
-		handleLogs(ctx, sess, user, st)
-	default:
-		printf(sess, errorStyle.Render("Unknown command: %s\n"), cmd[0])
-		println(sess, "Available commands: ls, cat, rm, activate, deactivate, run, verify, logs")
-	}
+	out(c.sess, errorStyle.Render("Unknown command: "+args[0]))
+	outf(c.sess, "Commands:\n%s", commandHelp())
 }
 
-func handleLs(ctx context.Context, sess ssh.Session, user *store.User, st *store.DB) {
-	configs, err := st.ListConfigs(ctx, user.ID)
+func (c *cmdCtx) config(filename string) (*store.Config, bool) {
+	cfg, err := c.store.GetConfig(c.ctx, c.user.ID, filename)
 	if err != nil {
-		println(sess, errorStyle.Render("Error: "+err.Error()))
+		out(c.sess, errorStyle.Render("Config not found: "+filename))
+		return nil, false
+	}
+	return cfg, true
+}
+
+// verifiedConfig is config plus the opt-in gate that scheduling and running share.
+func (c *cmdCtx) verifiedConfig(filename string) (*store.Config, bool) {
+	cfg, ok := c.config(filename)
+	if !ok {
+		return nil, false
+	}
+	if verified, err := c.store.IsEmailVerified(c.ctx, c.user.ID, cfg.Email); err != nil || !verified {
+		out(c.sess, errorStyle.Render("Email not verified: "+cfg.Email))
+		out(c.sess, dimStyle.Render("Run `verify "+filename+"` to get a fresh confirmation link."))
+		return nil, false
+	}
+	return cfg, true
+}
+
+func runLs(c *cmdCtx, _ string) {
+	configs, err := c.store.ListConfigs(c.ctx, c.user.ID)
+	if err != nil {
+		out(c.sess, errorStyle.Render("Error: "+err.Error()))
 		return
 	}
-
 	if len(configs) == 0 {
-		println(sess, dimStyle.Render("No configs found. Upload one with: scp feeds.txt <host>:"))
+		out(c.sess, dimStyle.Render("No configs found. Upload one with: scp feeds.txt <host>:"))
 		return
 	}
 
-	println(sess, titleStyle.Render("Your configs:"))
+	ids := make([]int64, len(configs))
+	for i, cfg := range configs {
+		ids[i] = cfg.ID
+	}
+	feeds, err := c.store.GetFeedsByConfigs(c.ctx, ids)
+	if err != nil {
+		out(c.sess, errorStyle.Render("Error: "+err.Error()))
+		return
+	}
 
+	out(c.sess, titleStyle.Render("Your configs:"))
 	for _, cfg := range configs {
-		feeds, err := st.GetFeedsByConfig(ctx, cfg.ID)
-		feedCount := 0
-		if err == nil {
-			feedCount = len(feeds)
-		}
-
-		nextRunStr := "never"
+		nextRun := "never"
 		if cfg.Active() {
-			nextRunStr = formatRelativeTime(cfg.NextRun.Time)
+			nextRun = formatRelativeTime(cfg.NextRun.Time)
 		}
-
 		marker := ""
-		if verified, err := st.IsEmailVerified(ctx, user.ID, cfg.Email); err == nil && !verified {
-			marker = errorStyle.Render(" (unverified — check email)")
+		if verified, err := c.store.IsEmailVerified(c.ctx, c.user.ID, cfg.Email); err == nil && !verified {
+			marker = errorStyle.Render(" (unverified, check email)")
 		}
-
-		printf(sess, "  %-20s %s  next: %s%s\n",
-			cfg.Filename,
-			dimStyle.Render(fmt.Sprintf("%d feed(s)", feedCount)),
-			nextRunStr,
-			marker,
-		)
+		outf(c.sess, "  %-20s %s  next: %s%s\n",
+			cfg.Filename, dimStyle.Render(fmt.Sprintf("%d feed(s)", len(feeds[cfg.ID]))), nextRun, marker)
 	}
 }
 
-func handleCat(ctx context.Context, sess ssh.Session, user *store.User, st *store.DB, filename string) {
-	cfg, err := st.GetConfig(ctx, user.ID, filename)
-	if err != nil {
-		println(sess, errorStyle.Render("Config not found: "+filename))
-		return
+func runCat(c *cmdCtx, filename string) {
+	if cfg, ok := c.config(filename); ok {
+		out(c.sess, titleStyle.Render("# "+filename))
+		out(c.sess, cfg.RawText)
 	}
-
-	println(sess, titleStyle.Render("# "+filename))
-	println(sess, cfg.RawText)
 }
 
-func handleRm(ctx context.Context, sess ssh.Session, user *store.User, st *store.DB, filename string) {
-	err := st.DeleteConfig(ctx, user.ID, filename)
-	if err != nil {
-		println(sess, errorStyle.Render("Error: "+err.Error()))
+func runRm(c *cmdCtx, filename string) {
+	if err := c.store.DeleteConfig(c.ctx, c.user.ID, filename); err != nil {
+		out(c.sess, errorStyle.Render("Error: "+err.Error()))
 		return
 	}
-
-	println(sess, successStyle.Render("Deleted: "+filename))
+	out(c.sess, successStyle.Render("Deleted: "+filename))
 }
 
-func handleActivate(ctx context.Context, sess ssh.Session, user *store.User, st *store.DB, filename string) {
-	cfg, err := st.GetConfig(ctx, user.ID, filename)
-	if err != nil {
-		println(sess, errorStyle.Render("Config not found: "+filename))
+func runActivate(c *cmdCtx, filename string) {
+	cfg, ok := c.verifiedConfig(filename)
+	if !ok {
 		return
 	}
-
-	// Scheduling is what makes a config send, so it carries the same opt-in gate
-	// as running one by hand.
-	verified, err := st.IsEmailVerified(ctx, user.ID, cfg.Email)
-	if err != nil || !verified {
-		println(sess, errorStyle.Render("Email not verified: "+cfg.Email))
-		println(sess, dimStyle.Render("Run `verify "+filename+"` to get a fresh confirmation link."))
+	if err := c.store.ActivateConfig(c.ctx, cfg); err != nil {
+		out(c.sess, errorStyle.Render("Error: "+err.Error()))
 		return
 	}
-
-	err = st.ActivateConfig(ctx, cfg)
-	if err != nil {
-		println(sess, errorStyle.Render("Error: "+err.Error()))
-		return
-	}
-
-	println(sess, successStyle.Render("Activated: "+filename))
+	out(c.sess, successStyle.Render("Activated: "+filename))
 }
 
-func handleDeactivate(ctx context.Context, sess ssh.Session, user *store.User, st *store.DB, filename string) {
-	cfg, err := st.GetConfig(ctx, user.ID, filename)
-	if err != nil {
-		println(sess, errorStyle.Render("Config not found: "+filename))
+func runDeactivate(c *cmdCtx, filename string) {
+	cfg, ok := c.config(filename)
+	if !ok {
 		return
 	}
-	if err := st.SetNextRun(ctx, cfg.ID, nil); err != nil {
-		println(sess, errorStyle.Render("Error: "+err.Error()))
+	if err := c.store.SetNextRun(c.ctx, cfg.ID, nil); err != nil {
+		out(c.sess, errorStyle.Render("Error: "+err.Error()))
 		return
 	}
-
-	println(sess, successStyle.Render("Deactivated: "+filename))
+	out(c.sess, successStyle.Render("Deactivated: "+filename))
 }
 
-func handleRun(ctx context.Context, sess ssh.Session, user *store.User, st *store.DB, sched *scheduler.Scheduler, filename string) {
-	cfg, err := st.GetConfig(ctx, user.ID, filename)
+func runRun(c *cmdCtx, filename string) {
+	cfg, ok := c.verifiedConfig(filename)
+	if !ok {
+		return
+	}
+	feeds, err := c.store.GetFeedsByConfig(c.ctx, cfg.ID)
 	if err != nil {
-		println(sess, errorStyle.Render("Config not found: "+filename))
+		out(c.sess, errorStyle.Render("Error: "+err.Error()))
 		return
 	}
 
-	// Gate sending on confirmed opt-in for the destination address.
-	if verified, err := st.IsEmailVerified(ctx, user.ID, cfg.Email); err != nil || !verified {
-		println(sess, errorStyle.Render("Email not verified: "+cfg.Email))
-		println(sess, dimStyle.Render("Run `verify "+filename+"` to get a fresh confirmation link."))
-		return
-	}
-
-	// Get feed count for progress display
-	feeds, err := st.GetFeedsByConfig(ctx, cfg.ID)
-	if err != nil {
-		println(sess, errorStyle.Render("Error: "+err.Error()))
-		return
-	}
-	totalFeeds := len(feeds)
-
-	// Progress tracking
 	var progress atomic.Int32
-	spinChars := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
-	done := make(chan struct{})
-	result := make(chan struct {
-		stats *scheduler.RunStats
-		err   error
-	})
+	stop := startSpinner(c.sess, &progress, len(feeds))
+	stats, err := c.sched.RunNow(c.ctx, cfg.ID, &progress)
+	stop()
 
-	// Spinner goroutine with real-time progress
+	if err != nil {
+		out(c.sess, errorStyle.Render("Error: "+err.Error()))
+		return
+	}
+	if stats.FailedFeeds > 0 {
+		outf(c.sess, "%s Fetched %d/%d feeds (%d failed)\n", dimStyle.Render("⚠"), stats.FetchedFeeds, stats.TotalFeeds, stats.FailedFeeds)
+	} else {
+		outf(c.sess, "%s Fetched %d/%d feeds\n", successStyle.Render("✓"), stats.FetchedFeeds, stats.TotalFeeds)
+	}
+	switch {
+	case stats.NewItems == 0:
+		out(c.sess, dimStyle.Render("No new items found."))
+	case stats.EmailSent:
+		out(c.sess, successStyle.Render(fmt.Sprintf("Sent %d new item(s) to %s", stats.NewItems, cfg.Email)))
+	default:
+		out(c.sess, dimStyle.Render(fmt.Sprintf("Found %d new item(s) but did not send email", stats.NewItems)))
+	}
+}
+
+// startSpinner draws fetch progress until the returned stop is called, which also clears the line.
+func startSpinner(w io.Writer, progress *atomic.Int32, total int) (stop func()) {
+	frames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+	done := make(chan struct{})
+	finished := make(chan struct{})
 	go func() {
-		i := 0
-		for {
+		defer close(finished)
+		ticker := time.NewTicker(80 * time.Millisecond)
+		defer ticker.Stop()
+		for i := 0; ; i++ {
+			outf(w, "\r%s Fetching feeds... %d/%d", frames[i%len(frames)], progress.Load(), total)
 			select {
 			case <-done:
 				return
-			default:
-				completed := progress.Load()
-				printf(sess, "\r%s Fetching feeds... %d/%d", spinChars[i%len(spinChars)], completed, totalFeeds)
-				i++
-				time.Sleep(80 * time.Millisecond)
+			case <-ticker.C:
 			}
 		}
 	}()
-
-	// Work goroutine
-	go func() {
-		stats, err := sched.RunNow(ctx, cfg.ID, &progress)
-		result <- struct {
-			stats *scheduler.RunStats
-			err   error
-		}{stats: stats, err: err}
-	}()
-
-	// Wait for result
-	res := <-result
-	close(done)
-	print(sess, "\r\033[K") // Clear the spinner line
-
-	if res.err != nil {
-		println(sess, errorStyle.Render("Error: "+res.err.Error()))
-		return
-	}
-
-	// Display detailed stats
-	if res.stats != nil {
-		if res.stats.FailedFeeds > 0 {
-			printf(sess, "%s Fetched %d/%d feeds (%d failed)\n",
-				dimStyle.Render("⚠"),
-				res.stats.FetchedFeeds,
-				res.stats.TotalFeeds,
-				res.stats.FailedFeeds)
-		} else {
-			printf(sess, "%s Fetched %d/%d feeds\n",
-				successStyle.Render("✓"),
-				res.stats.FetchedFeeds,
-				res.stats.TotalFeeds)
-		}
-
-		if res.stats.NewItems == 0 {
-			println(sess, dimStyle.Render("No new items found."))
-		} else {
-			if res.stats.EmailSent {
-				println(sess, successStyle.Render(fmt.Sprintf("Sent %d new item(s) to %s", res.stats.NewItems, cfg.Email)))
-			} else {
-				println(sess, dimStyle.Render(fmt.Sprintf("Found %d new item(s) but did not send email", res.stats.NewItems)))
-			}
-		}
+	return func() {
+		close(done)
+		<-finished
+		outf(w, "\r\033[K")
 	}
 }
 
-// handleVerify re-sends the confirmation email for a config's address. The
-// scheduler owns the cooldown and the per-IP and per-key caps, so this is just
-// a way to ask again after the first link is lost or expired.
-func handleVerify(ctx context.Context, sess ssh.Session, user *store.User, st *store.DB, verifier *verify.Service, filename string) {
-	cfg, err := st.GetConfig(ctx, user.ID, filename)
-	if err != nil {
-		println(sess, errorStyle.Render("Config not found: "+filename))
+// runVerify asks again for a confirmation email after the first is lost or expired.
+func runVerify(c *cmdCtx, filename string) {
+	cfg, ok := c.config(filename)
+	if !ok {
 		return
 	}
-
 	ipKey := ""
-	if addr := sess.RemoteAddr(); addr != nil {
+	if addr := c.sess.RemoteAddr(); addr != nil {
 		ipKey = rateLimitIPKey(addr)
 	}
 
-	status, err := verifier.Request(ctx, user.ID, cfg.Email, user.PubkeyFP, ipKey)
+	status, err := c.verifier.Request(c.ctx, c.user.ID, cfg.Email, c.user.PubkeyFP, ipKey)
 	if err != nil {
-		println(sess, errorStyle.Render("Could not send confirmation: "+err.Error()))
+		out(c.sess, errorStyle.Render("Could not send confirmation: "+err.Error()))
 		return
 	}
-
 	switch status {
 	case verify.AlreadyVerified:
-		println(sess, successStyle.Render(cfg.Email+" is already verified."))
+		out(c.sess, successStyle.Render(cfg.Email+" is already verified."))
 	case verify.Sent:
-		println(sess, successStyle.Render("Confirmation sent to "+cfg.Email))
+		out(c.sess, successStyle.Render("Confirmation sent to "+cfg.Email))
 	case verify.Pending:
-		println(sess, dimStyle.Render("A confirmation was sent to "+cfg.Email+" recently. Check that mailbox, including spam."))
+		out(c.sess, dimStyle.Render("A confirmation was sent to "+cfg.Email+" recently. Check that mailbox, including spam."))
 	case verify.Throttled:
-		println(sess, errorStyle.Render("Too many confirmation requests. Try again tomorrow."))
+		out(c.sess, errorStyle.Render("Too many confirmation requests. Try again tomorrow."))
 	}
 }
 
-func handleLogs(ctx context.Context, sess ssh.Session, user *store.User, st *store.DB) {
-	logs, err := st.GetRecentLogs(ctx, user.ID, 20)
+func runLogs(c *cmdCtx, _ string) {
+	logs, err := c.store.GetRecentLogs(c.ctx, c.user.ID, 20)
 	if err != nil {
-		println(sess, errorStyle.Render("Error: "+err.Error()))
+		out(c.sess, errorStyle.Render("Error: "+err.Error()))
 		return
 	}
-
 	if len(logs) == 0 {
-		println(sess, dimStyle.Render("No logs yet."))
+		out(c.sess, dimStyle.Render("No logs yet."))
 		return
 	}
 
-	println(sess, titleStyle.Render("Recent activity:"))
-
+	out(c.sess, titleStyle.Render("Recent activity:"))
 	for _, l := range logs {
 		levelStyle := dimStyle
 		switch strings.ToLower(l.Level) {
@@ -349,36 +288,23 @@ func handleLogs(ctx context.Context, sess ssh.Session, user *store.User, st *sto
 		case "info":
 			levelStyle = successStyle
 		}
-
-		timestamp := l.CreatedAt.Format("Jan 02 15:04")
-		printf(sess, "  %s  %s  %s\n",
-			dimStyle.Render(timestamp),
-			levelStyle.Render(fmt.Sprintf("[%s]", l.Level)),
-			l.Message,
-		)
+		outf(c.sess, "  %s  %s  %s\n",
+			dimStyle.Render(l.CreatedAt.Format("Jan 02 15:04")), levelStyle.Render("["+l.Level+"]"), l.Message)
 	}
 }
 
 func formatRelativeTime(t time.Time) string {
-	now := time.Now().UTC()
-	diff := t.Sub(now)
-
-	if diff < 0 {
+	diff := time.Until(t)
+	switch {
+	case diff < 0:
 		return "overdue"
-	}
-
-	if diff < time.Minute {
+	case diff < time.Minute:
 		return "< 1 min"
+	case diff < time.Hour:
+		return fmt.Sprintf("%d min", int(diff.Minutes()))
+	case diff < 24*time.Hour:
+		return fmt.Sprintf("%d hr", int(diff.Hours()))
+	default:
+		return fmt.Sprintf("%d day(s)", int(diff.Hours()/24))
 	}
-	if diff < time.Hour {
-		mins := int(diff.Minutes())
-		return fmt.Sprintf("%d min", mins)
-	}
-	if diff < 24*time.Hour {
-		hours := int(diff.Hours())
-		return fmt.Sprintf("%d hr", hours)
-	}
-
-	days := int(diff.Hours() / 24)
-	return fmt.Sprintf("%d day(s)", days)
 }

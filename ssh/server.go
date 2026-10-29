@@ -166,7 +166,7 @@ func (s *Server) commandMiddleware(next ssh.Handler) ssh.Handler {
 		user, err := sessionUser(sess, s.store)
 		if err != nil {
 			s.logger.Error("failed to load session user", "err", err)
-			println(sess, "Authentication error")
+			out(sess, "Authentication error")
 			return
 		}
 
@@ -189,29 +189,22 @@ func (s *Server) commandMiddleware(next ssh.Handler) ssh.Handler {
 		// cryptic "unexpected end of file" the client gets when the server
 		// never speaks the rsync protocol.
 		if cmd[0] == "rsync" {
-			printf(sess.Stderr(), "herald: rsync is not supported. Upload with scp instead:\n  scp <file>.txt %s:\n", sess.User())
+			outf(sess.Stderr(), "herald: rsync is not supported. Upload with scp instead:\n  scp <file>.txt %s:\n", sess.User())
 			_ = sess.Exit(2)
 			return
 		}
 
-		// Handle our custom commands (ls, cat, rm, run, logs)
-		HandleCommand(sess, user, s.store, s.scheduler, s.verifier, s.logger)
+		runCommand(&cmdCtx{
+			ctx: sess.Context(), sess: sess, user: user,
+			store: s.store, sched: s.scheduler, verifier: s.verifier,
+		}, cmd)
 	}
 }
 
 func (s *Server) handleWelcome(sess ssh.Session, user *store.User) {
-	printf(sess, "Welcome to Herald!\n\n")
-	printf(sess, "Your fingerprint: %s\n\n", user.PubkeyFP)
-	printf(sess, "Upload a config with:\n")
-	printf(sess, "  scp feeds.txt %s:\n\n", sess.User())
-	printf(sess, "Commands:\n")
-	printf(sess, "  ls                   List your configs\n")
-	printf(sess, "  cat <file>           Show config contents\n")
-	printf(sess, "  rm <file>            Delete a config\n")
-	printf(sess, "  activate <file>      Enable a config\n")
-	printf(sess, "  deactivate <file>    Disable a config\n")
-	printf(sess, "  run <file>           Run a config now\n")
-	printf(sess, "  logs                 Show recent activity\n")
+	outf(sess, "Welcome to Herald!\n\nYour fingerprint: %s\n\n", user.PubkeyFP)
+	outf(sess, "Upload a config with:\n  scp feeds.txt %s:\n\n", sess.User())
+	outf(sess, "Commands:\n%s", commandHelp())
 }
 
 func (s *Server) ensureHostKey() error {
