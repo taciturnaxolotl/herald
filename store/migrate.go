@@ -21,6 +21,7 @@ var migrations = []migration{
 	{"baseline schema", baselineSchema},
 	{"cascade config deletes and drop the unused digest column", rebuildConfigs},
 	{"store strip_image_hosts", storeStripImageHosts},
+	{"enforce uniqueness and drop redundant indexes", tightenIndexes},
 }
 
 // migrate applies pending migrations, each in its own transaction. Foreign
@@ -267,4 +268,28 @@ func storeStripImageHosts(ctx context.Context, tx *sql.Tx) error {
 		}
 	}
 	return nil
+}
+
+// tightenIndexes makes a config list each feed URL once and own one
+// unsubscribe token, and drops indexes a UNIQUE constraint already provides.
+// Foreign keys are off here, so duplicate feeds' history is removed by hand.
+func tightenIndexes(ctx context.Context, tx *sql.Tx) error {
+	_, err := tx.ExecContext(ctx, `
+	DELETE FROM seen_items WHERE feed_id IN (
+		SELECT id FROM feeds WHERE id NOT IN (SELECT MIN(id) FROM feeds GROUP BY config_id, url));
+	DELETE FROM feeds WHERE id NOT IN (SELECT MIN(id) FROM feeds GROUP BY config_id, url);
+	DELETE FROM unsubscribe_tokens WHERE id NOT IN (SELECT MIN(id) FROM unsubscribe_tokens GROUP BY config_id);
+
+	CREATE UNIQUE INDEX idx_feeds_config_url ON feeds(config_id, url);
+	CREATE UNIQUE INDEX idx_unsubscribe_tokens_config ON unsubscribe_tokens(config_id);
+
+	DROP INDEX IF EXISTS idx_feeds_config_id;
+	DROP INDEX IF EXISTS idx_configs_user_id;
+	DROP INDEX IF EXISTS idx_seen_items_feed_id;
+	DROP INDEX IF EXISTS idx_unsubscribe_tokens_token;
+	DROP INDEX IF EXISTS idx_verified_emails_user_email;
+	DROP INDEX IF EXISTS idx_verified_emails_token;
+	DROP INDEX IF EXISTS idx_email_sends_tracking_token;
+	`)
+	return err
 }

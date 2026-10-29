@@ -2,8 +2,6 @@ package store
 
 import (
 	"context"
-	"database/sql"
-	"errors"
 	"fmt"
 )
 
@@ -22,26 +20,23 @@ func (q *Queries) DeleteToken(ctx context.Context, token string) error {
 	return err
 }
 
+// GetOrCreateUnsubscribeToken returns the config's one unsubscribe token,
+// creating it if needed; concurrent callers get the same token.
 func (q *Queries) GetOrCreateUnsubscribeToken(ctx context.Context, configID int64) (string, error) {
-	var token string
-	err := q.q.QueryRowContext(ctx,
-		`SELECT token FROM unsubscribe_tokens WHERE config_id = ? LIMIT 1`, configID,
-	).Scan(&token)
-	if err == nil {
-		return token, nil
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return "", err
-	}
-
-	token, err = NewToken()
+	token, err := NewToken()
 	if err != nil {
 		return "", err
 	}
 	if _, err := q.q.ExecContext(ctx,
-		`INSERT INTO unsubscribe_tokens (token, config_id) VALUES (?, ?)`, token, configID,
+		`INSERT INTO unsubscribe_tokens (token, config_id) VALUES (?, ?) ON CONFLICT(config_id) DO NOTHING`,
+		token, configID,
 	); err != nil {
 		return "", fmt.Errorf("insert token: %w", err)
+	}
+	if err := q.q.QueryRowContext(ctx,
+		`SELECT token FROM unsubscribe_tokens WHERE config_id = ?`, configID,
+	).Scan(&token); err != nil {
+		return "", fmt.Errorf("read token: %w", err)
 	}
 	return token, nil
 }

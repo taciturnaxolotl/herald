@@ -3,7 +3,9 @@ package store
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestOpenRecordsSchemaVersion(t *testing.T) {
@@ -139,5 +141,63 @@ func TestStoreStripImageHostsBackfills(t *testing.T) {
 	}
 	if len(cfg.StripImageHosts) != 2 || cfg.StripImageHosts[0] != "stickers.example" {
 		t.Fatalf("backfilled hosts = %v", cfg.StripImageHosts)
+	}
+}
+
+func TestTightenIndexesDedupes(t *testing.T) {
+	db := setupTestDB(t)
+	ctx := context.Background()
+	user, _ := db.GetOrCreateUser(ctx, "fp", "key")
+	cfg, _ := db.CreateConfig(ctx, user.ID, "a.txt", "a@example.com", "0 8 * * *", false, "raw", time.Now())
+
+	tx, err := db.conn.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, stmt := range []string{
+		`DROP INDEX idx_feeds_config_url`,
+		`DROP INDEX idx_unsubscribe_tokens_config`,
+		`INSERT INTO feeds (id, config_id, url) VALUES (1, ?1, 'https://x/f'), (2, ?1, 'https://x/f')`,
+		`INSERT INTO seen_items (feed_id, guid) VALUES (1, 'keep'), (2, 'drop')`,
+		`INSERT INTO unsubscribe_tokens (token, config_id) VALUES ('t1', ?1), ('t2', ?1)`,
+	} {
+		var args []any
+		if strings.Contains(stmt, "?1") {
+			args = []any{cfg.ID}
+		}
+		if _, err := tx.ExecContext(ctx, stmt, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tightenIndexes(ctx, tx); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+
+	feeds, _ := db.GetFeedsByConfig(ctx, cfg.ID)
+	if len(feeds) != 1 || feeds[0].ID != 1 {
+		t.Fatalf("expected the first feed kept, got %+v", feeds)
+	}
+	if token, _ := db.GetOrCreateUnsubscribeToken(ctx, cfg.ID); token != "t1" {
+		t.Fatalf("expected the first token kept, got %q", token)
+	}
+	if _, err := db.CreateFeed(ctx, cfg.ID, "https://x/f", ""); err == nil {
+		t.Fatal("a duplicate feed URL must now be refused")
+	}
+}
+
+func TestGetOrCreateUnsubscribeTokenIsStable(t *testing.T) {
+	db := setupTestDB(t)
+	ctx := context.Background()
+	user, _ := db.GetOrCreateUser(ctx, "fp", "key")
+	cfg, _ := db.CreateConfig(ctx, user.ID, "a.txt", "a@example.com", "0 8 * * *", false, "raw", time.Now())
+	a, err := db.GetOrCreateUnsubscribeToken(ctx, cfg.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := db.GetOrCreateUnsubscribeToken(ctx, cfg.ID); a != b {
+		t.Fatalf("token changed: %q then %q", a, b)
 	}
 }
