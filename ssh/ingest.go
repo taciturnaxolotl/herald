@@ -160,7 +160,7 @@ func formatUploadError(filename string, err error) string {
 	}
 	var lineErrs config.LineErrors
 	if errors.As(err, &lineErrs) {
-		fmt.Fprintf(&b, "\nherald: rejected %s, it has lines Herald does not understand:\n\n", filename)
+		fmt.Fprintf(&b, "\nherald: error parsing %s\n\n", filename)
 		for _, le := range lineErrs {
 			fmt.Fprintf(&b, "  line %d: %s\n", le.Line, le.Msg)
 		}
