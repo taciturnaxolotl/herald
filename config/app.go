@@ -75,7 +75,9 @@ func LoadAppConfig(path string) (*AppConfig, error) {
 		}
 	}
 
-	applyEnvOverrides(cfg)
+	if err := applyEnvOverrides(cfg); err != nil {
+		return nil, err
+	}
 
 	// Default external_ssh_port to ssh_port if not set
 	if cfg.ExternalSSHPort == 0 {
@@ -114,67 +116,48 @@ func findEnvFile(configPath string) string {
 	return ""
 }
 
-func applyEnvOverrides(cfg *AppConfig) {
-	if v := os.Getenv("HERALD_HOST"); v != "" {
-		cfg.Host = v
+// applyEnvOverrides lets HERALD_* variables override the file; a malformed
+// number is an error rather than being silently ignored.
+func applyEnvOverrides(cfg *AppConfig) error {
+	strs := map[string]*string{
+		"HERALD_HOST":                       &cfg.Host,
+		"HERALD_HOST_KEY_PATH":              &cfg.HostKeyPath,
+		"HERALD_DB_PATH":                    &cfg.DBPath,
+		"HERALD_ORIGIN":                     &cfg.Origin,
+		"HERALD_LOG_LEVEL":                  &cfg.LogLevel,
+		"HERALD_SMTP_HOST":                  &cfg.SMTP.Host,
+		"HERALD_SMTP_USER":                  &cfg.SMTP.User,
+		"HERALD_SMTP_PASS":                  &cfg.SMTP.Pass,
+		"HERALD_SMTP_FROM":                  &cfg.SMTP.From,
+		"HERALD_SMTP_DKIM_PRIVATE_KEY":      &cfg.SMTP.DKIMPrivateKey,
+		"HERALD_SMTP_DKIM_PRIVATE_KEY_FILE": &cfg.SMTP.DKIMPrivateKeyFile,
+		"HERALD_SMTP_DKIM_SELECTOR":         &cfg.SMTP.DKIMSelector,
+		"HERALD_SMTP_DKIM_DOMAIN":           &cfg.SMTP.DKIMDomain,
 	}
-	if v := os.Getenv("HERALD_SSH_PORT"); v != "" {
-		if port, err := strconv.Atoi(v); err == nil {
-			cfg.SSHPort = port
+	for key, dst := range strs {
+		if v := os.Getenv(key); v != "" {
+			*dst = v
 		}
 	}
-	if v := os.Getenv("HERALD_EXTERNAL_SSH_PORT"); v != "" {
-		if port, err := strconv.Atoi(v); err == nil {
-			cfg.ExternalSSHPort = port
+
+	ints := map[string]*int{
+		"HERALD_SSH_PORT":          &cfg.SSHPort,
+		"HERALD_EXTERNAL_SSH_PORT": &cfg.ExternalSSHPort,
+		"HERALD_HTTP_PORT":         &cfg.HTTPPort,
+		"HERALD_SMTP_PORT":         &cfg.SMTP.Port,
+	}
+	for key, dst := range ints {
+		if v := os.Getenv(key); v != "" {
+			n, err := strconv.Atoi(v)
+			if err != nil {
+				return fmt.Errorf("%s must be a number, got %q", key, v)
+			}
+			*dst = n
 		}
 	}
-	if v := os.Getenv("HERALD_HTTP_PORT"); v != "" {
-		if port, err := strconv.Atoi(v); err == nil {
-			cfg.HTTPPort = port
-		}
-	}
-	if v := os.Getenv("HERALD_HOST_KEY_PATH"); v != "" {
-		cfg.HostKeyPath = v
-	}
-	if v := os.Getenv("HERALD_DB_PATH"); v != "" {
-		cfg.DBPath = v
-	}
-	if v := os.Getenv("HERALD_SMTP_HOST"); v != "" {
-		cfg.SMTP.Host = v
-	}
-	if v := os.Getenv("HERALD_SMTP_PORT"); v != "" {
-		if port, err := strconv.Atoi(v); err == nil {
-			cfg.SMTP.Port = port
-		}
-	}
-	if v := os.Getenv("HERALD_SMTP_USER"); v != "" {
-		cfg.SMTP.User = v
-	}
-	if v := os.Getenv("HERALD_SMTP_PASS"); v != "" {
-		cfg.SMTP.Pass = v
-	}
-	if v := os.Getenv("HERALD_SMTP_FROM"); v != "" {
-		cfg.SMTP.From = v
-	}
-	if v := os.Getenv("HERALD_SMTP_DKIM_PRIVATE_KEY"); v != "" {
-		cfg.SMTP.DKIMPrivateKey = v
-	}
-	if v := os.Getenv("HERALD_SMTP_DKIM_PRIVATE_KEY_FILE"); v != "" {
-		cfg.SMTP.DKIMPrivateKeyFile = v
-	}
-	if v := os.Getenv("HERALD_SMTP_DKIM_SELECTOR"); v != "" {
-		cfg.SMTP.DKIMSelector = v
-	}
-	if v := os.Getenv("HERALD_SMTP_DKIM_DOMAIN"); v != "" {
-		cfg.SMTP.DKIMDomain = v
-	}
+
 	if v := os.Getenv("HERALD_ALLOW_ALL_KEYS"); v != "" {
-		cfg.AllowAllKeys = strings.ToLower(v) == "true"
+		cfg.AllowAllKeys = strings.EqualFold(v, "true")
 	}
-	if v := os.Getenv("HERALD_ORIGIN"); v != "" {
-		cfg.Origin = v
-	}
-	if v := os.Getenv("HERALD_LOG_LEVEL"); v != "" {
-		cfg.LogLevel = v
-	}
+	return nil
 }
