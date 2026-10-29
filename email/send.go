@@ -46,44 +46,49 @@ type Mailer struct {
 func NewMailer(cfg SMTPConfig) (*Mailer, error) {
 	m := &Mailer{cfg: cfg, timeout: smtpTimeout}
 
-	// Parse DKIM private key if provided
-	var keyData string
-	if cfg.DKIMPrivateKey != "" {
-		keyData = cfg.DKIMPrivateKey
-	} else if cfg.DKIMPrivateKeyFile != "" {
+	keyData := cfg.DKIMPrivateKey
+	if keyData == "" && cfg.DKIMPrivateKeyFile != "" {
 		keyBytes, err := os.ReadFile(cfg.DKIMPrivateKeyFile)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read DKIM private key file: %w", err)
 		}
 		keyData = string(keyBytes)
 	}
-
-	if keyData != "" && strings.Contains(keyData, "BEGIN") {
-		// Replace literal \n with actual newlines (for .env file compatibility)
-		keyData = strings.ReplaceAll(keyData, "\\n", "\n")
-
-		block, _ := pem.Decode([]byte(keyData))
-		if block == nil {
-			return nil, fmt.Errorf("failed to decode DKIM private key PEM")
-		}
-
-		key, err := x509.ParsePKCS1PrivateKey(block.Bytes)
-		if err != nil {
-			// Try PKCS8 format
-			keyInterface, err := x509.ParsePKCS8PrivateKey(block.Bytes)
-			if err != nil {
-				return nil, fmt.Errorf("failed to parse DKIM private key: %w", err)
-			}
-			var ok bool
-			key, ok = keyInterface.(*rsa.PrivateKey)
-			if !ok {
-				return nil, fmt.Errorf("DKIM private key is not RSA")
-			}
-		}
-		m.dkimKey = key
+	if keyData == "" {
+		return m, nil
 	}
 
+	// A key that cannot sign would silently send unsigned mail, so refuse to start instead.
+	if cfg.DKIMDomain == "" || cfg.DKIMSelector == "" {
+		return nil, fmt.Errorf("DKIM private key is set but dkim_domain or dkim_selector is missing")
+	}
+	key, err := parseDKIMKey(keyData)
+	if err != nil {
+		return nil, err
+	}
+	m.dkimKey = key
 	return m, nil
+}
+
+// parseDKIMKey reads a PEM RSA key in PKCS#1 or PKCS#8 form; literal "\n"
+// sequences are accepted for keys pasted into .env files.
+func parseDKIMKey(data string) (*rsa.PrivateKey, error) {
+	block, _ := pem.Decode([]byte(strings.ReplaceAll(data, "\\n", "\n")))
+	if block == nil {
+		return nil, fmt.Errorf("failed to decode DKIM private key PEM")
+	}
+	if key, err := x509.ParsePKCS1PrivateKey(block.Bytes); err == nil {
+		return key, nil
+	}
+	parsed, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse DKIM private key: %w", err)
+	}
+	key, ok := parsed.(*rsa.PrivateKey)
+	if !ok {
+		return nil, fmt.Errorf("DKIM private key is not RSA")
+	}
+	return key, nil
 }
 
 // ValidateConfig tests SMTP connectivity and auth.
@@ -243,7 +248,7 @@ func (m *Mailer) deliver(to, subject, htmlBody, textBody string, extraHeaders ma
 	messageBytes := []byte(msg.String())
 
 	// Sign with DKIM if configured
-	if m.dkimKey != nil && m.cfg.DKIMDomain != "" && m.cfg.DKIMSelector != "" {
+	if m.dkimKey != nil {
 		signed, err := m.signDKIM(messageBytes)
 		if err != nil {
 			return fmt.Errorf("DKIM signing: %w", err)
