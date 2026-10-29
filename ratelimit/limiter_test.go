@@ -21,9 +21,6 @@ func TestNew(t *testing.T) {
 	if limiter.limiters == nil {
 		t.Error("limiters map not initialized")
 	}
-	if limiter.lastSeen == nil {
-		t.Error("lastSeen map not initialized")
-	}
 }
 
 func TestAllow_SingleKey(t *testing.T) {
@@ -88,64 +85,31 @@ func TestAllow_TokenRefill(t *testing.T) {
 	}
 }
 
-func TestAllow_UpdatesLastSeen(t *testing.T) {
-	limiter := New(10, 5)
-	key := "test-key"
+func TestSweepKeepsExhaustedBuckets(t *testing.T) {
+	limiter := &Limiter{limiters: make(map[string]*rate.Limiter), rate: rate.Limit(5.0 / 86400), burst: 5}
 
-	before := time.Now()
-	limiter.Allow(key)
-	after := time.Now()
-
-	limiter.mu.RLock()
-	lastSeen, exists := limiter.lastSeen[key]
-	limiter.mu.RUnlock()
-
-	if !exists {
-		t.Fatal("lastSeen not updated for key")
+	for i := 0; i < 5; i++ {
+		if !limiter.Allow("ip") {
+			t.Fatalf("request %d should be allowed", i+1)
+		}
 	}
-	if lastSeen.Before(before) || lastSeen.After(after) {
-		t.Errorf("lastSeen timestamp %v not in range [%v, %v]", lastSeen, before, after)
+	limiter.sweep(time.Now().Add(15 * time.Minute))
+
+	if limiter.Allow("ip") {
+		t.Error("an idle period must not reset a daily limit")
 	}
 }
 
-func TestCleanup(t *testing.T) {
-	limiter := &Limiter{
-		limiters: make(map[string]*rate.Limiter),
-		rate:     10,
-		burst:    5,
-		cleanup:  100 * time.Millisecond,
-		lastSeen: make(map[string]time.Time),
-	}
+func TestSweepEvictsRefilledBuckets(t *testing.T) {
+	limiter := &Limiter{limiters: make(map[string]*rate.Limiter), rate: 10, burst: 5}
 
-	// Add old entries
-	oldTime := time.Now().Add(-1 * time.Hour)
-	limiter.limiters["old-key"] = rate.NewLimiter(10, 5)
-	limiter.lastSeen["old-key"] = oldTime
+	limiter.Allow("old-key")
+	limiter.sweep(time.Now().Add(time.Hour))
 
-	// Add recent entry
-	limiter.Allow("recent-key")
-
-	// Run cleanup
 	limiter.mu.Lock()
-	cutoff := time.Now().Add(-limiter.cleanup * 2)
-	for key, lastSeen := range limiter.lastSeen {
-		if lastSeen.Before(cutoff) {
-			delete(limiter.limiters, key)
-			delete(limiter.lastSeen, key)
-		}
-	}
+	_, exists := limiter.limiters["old-key"]
 	limiter.mu.Unlock()
-
-	// Check old key removed
-	limiter.mu.RLock()
-	_, oldExists := limiter.limiters["old-key"]
-	_, recentExists := limiter.limiters["recent-key"]
-	limiter.mu.RUnlock()
-
-	if oldExists {
-		t.Error("old key should be removed")
-	}
-	if !recentExists {
-		t.Error("recent key should remain")
+	if exists {
+		t.Error("refilled bucket should be evicted")
 	}
 }

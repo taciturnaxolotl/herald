@@ -10,12 +10,11 @@ import (
 
 // Limiter provides per-key rate limiting using token bucket algorithm
 type Limiter struct {
-	mu       sync.RWMutex
+	mu       sync.Mutex
 	limiters map[string]*rate.Limiter
 	rate     rate.Limit
 	burst    int
 	cleanup  time.Duration
-	lastSeen map[string]time.Time
 }
 
 // New creates a new Limiter with the given rate (requests per second) and burst size
@@ -25,7 +24,6 @@ func New(rps float64, burst int) *Limiter {
 		rate:     rate.Limit(rps),
 		burst:    burst,
 		cleanup:  5 * time.Minute,
-		lastSeen: make(map[string]time.Time),
 	}
 	go l.cleanupLoop()
 	return l
@@ -41,25 +39,26 @@ func (l *Limiter) Allow(key string) bool {
 		limiter = rate.NewLimiter(l.rate, l.burst)
 		l.limiters[key] = limiter
 	}
-
-	l.lastSeen[key] = time.Now()
 	return limiter.Allow()
 }
 
-// cleanupLoop removes limiters that haven't been used recently
 func (l *Limiter) cleanupLoop() {
 	ticker := time.NewTicker(l.cleanup)
 	defer ticker.Stop()
+	for now := range ticker.C {
+		l.sweep(now)
+	}
+}
 
-	for range ticker.C {
-		l.mu.Lock()
-		cutoff := time.Now().Add(-l.cleanup * 2)
-		for key, lastSeen := range l.lastSeen {
-			if lastSeen.Before(cutoff) {
-				delete(l.limiters, key)
-				delete(l.lastSeen, key)
-			}
+// sweep drops only buckets that have fully refilled, since a fresh bucket
+// would grant exactly the same requests; evicting anything earlier resets
+// the limit.
+func (l *Limiter) sweep(now time.Time) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for key, limiter := range l.limiters {
+		if limiter.TokensAt(now) >= float64(l.burst) {
+			delete(l.limiters, key)
 		}
-		l.mu.Unlock()
 	}
 }
