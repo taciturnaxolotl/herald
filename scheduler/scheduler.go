@@ -22,8 +22,8 @@ const (
 	emailRateBurst         = 1
 	emailsPerSecondPerUser = emailsPerMinutePerUser / 60.0
 
-	// Cleanup intervals
 	cleanupInterval     = 24 * time.Hour
+	engagementInterval  = 7 * 24 * time.Hour
 	seenItemsRetention  = 6 * 30 * 24 * time.Hour // 6 months
 	itemMaxAge          = 3 * 30 * 24 * time.Hour // 3 months
 	emailSendsRetention = 6 * 30                  // 6 months in days
@@ -161,21 +161,13 @@ func (s *Scheduler) RequestEmailVerification(ctx context.Context, userID int64, 
 func (s *Scheduler) Start(ctx context.Context) {
 	ticker := time.NewTicker(s.interval)
 	defer ticker.Stop()
-
-	// Cleanup ticker runs every 24 hours
-	cleanupTicker := time.NewTicker(24 * time.Hour)
+	cleanupTicker := time.NewTicker(cleanupInterval)
 	defer cleanupTicker.Stop()
-
-	// Engagement check ticker runs weekly
-	engagementTicker := time.NewTicker(7 * 24 * time.Hour)
+	engagementTicker := time.NewTicker(engagementInterval)
 	defer engagementTicker.Stop()
 
 	s.logger.Info("scheduler started", "interval", s.interval)
-
-	// Run cleanup on start
-	s.cleanupOldSeenItems(ctx)
-	s.cleanupOldEmailSends(ctx)
-	s.cleanupStalePendingVerifications(ctx)
+	s.cleanup(ctx)
 
 	for {
 		select {
@@ -185,63 +177,43 @@ func (s *Scheduler) Start(ctx context.Context) {
 		case <-ticker.C:
 			s.tick(ctx)
 		case <-cleanupTicker.C:
-			s.cleanupOldSeenItems(ctx)
-			s.cleanupOldEmailSends(ctx)
-			s.cleanupStalePendingVerifications(ctx)
+			s.cleanup(ctx)
 		case <-engagementTicker.C:
 			s.checkAndDeactivateInactiveConfigs(ctx)
 		}
 	}
 }
 
-func (s *Scheduler) cleanupOldSeenItems(ctx context.Context) {
-	defer func() {
-		if r := recover(); r != nil {
-			s.logger.Error("panic during cleanup", "panic", r)
-		}
-	}()
-
-	deleted, err := s.store.CleanupOldSeenItems(ctx, seenItemsRetention)
-	if err != nil {
-		s.logger.Error("failed to cleanup old seen items", "err", err)
-		return
+// cleanup prunes old records; each job is isolated so one failure or panic doesn't skip the rest.
+func (s *Scheduler) cleanup(ctx context.Context) {
+	jobs := []struct {
+		name string
+		run  func(context.Context) (int64, error)
+	}{
+		{"seen items", func(ctx context.Context) (int64, error) {
+			return s.store.CleanupOldSeenItems(ctx, seenItemsRetention)
+		}},
+		{"email sends", func(ctx context.Context) (int64, error) {
+			return s.store.CleanupOldSends(ctx, emailSendsRetention)
+		}},
+		{"stale verifications", func(ctx context.Context) (int64, error) {
+			return s.store.DeleteStalePendingVerifications(ctx, staleVerificationAge)
+		}},
 	}
-	if deleted > 0 {
-		s.logger.Info("cleaned up old seen items", "deleted", deleted)
-	}
-}
-
-func (s *Scheduler) cleanupOldEmailSends(ctx context.Context) {
-	defer func() {
-		if r := recover(); r != nil {
-			s.logger.Error("panic during email sends cleanup", "panic", r)
-		}
-	}()
-
-	deleted, err := s.store.CleanupOldSends(ctx, emailSendsRetention)
-	if err != nil {
-		s.logger.Error("failed to cleanup old email sends", "err", err)
-		return
-	}
-	if deleted > 0 {
-		s.logger.Info("cleaned up old email sends", "deleted", deleted)
-	}
-}
-
-func (s *Scheduler) cleanupStalePendingVerifications(ctx context.Context) {
-	defer func() {
-		if r := recover(); r != nil {
-			s.logger.Error("panic during verification cleanup", "panic", r)
-		}
-	}()
-
-	deleted, err := s.store.DeleteStalePendingVerifications(ctx, staleVerificationAge)
-	if err != nil {
-		s.logger.Error("failed to clean up stale verifications", "err", err)
-		return
-	}
-	if deleted > 0 {
-		s.logger.Info("cleaned up stale pending verifications", "deleted", deleted)
+	for _, job := range jobs {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					s.logger.Error("panic during cleanup", "job", job.name, "panic", r)
+				}
+			}()
+			deleted, err := job.run(ctx)
+			if err != nil {
+				s.logger.Error("cleanup failed", "job", job.name, "err", err)
+			} else if deleted > 0 {
+				s.logger.Info("cleaned up", "job", job.name, "deleted", deleted)
+			}
+		}()
 	}
 }
 

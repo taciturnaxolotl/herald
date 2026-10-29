@@ -10,13 +10,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/mmcdole/gofeed"
 	"github.com/taciturnaxolotl/herald/safehttp"
 	"github.com/taciturnaxolotl/herald/store"
+	"golang.org/x/sync/errgroup"
 )
 
 const (
@@ -134,30 +134,18 @@ func FetchFeed(ctx context.Context, feed *store.Feed) *FetchResult {
 
 func FetchFeeds(ctx context.Context, feeds []*store.Feed, progress *atomic.Int32) []*FetchResult {
 	results := make([]*FetchResult, len(feeds))
-	var wg sync.WaitGroup
-
-	concurrent := maxConcurrentFetch
-	if len(feeds) < concurrent {
-		concurrent = len(feeds)
-	}
-	semaphore := make(chan struct{}, concurrent)
-
+	var g errgroup.Group
+	g.SetLimit(maxConcurrentFetch)
 	for i, feed := range feeds {
-		wg.Add(1)
-		go func(idx int, f *store.Feed) {
-			defer func() {
-				if progress != nil {
-					progress.Add(1)
-				}
-				wg.Done()
-			}()
-			semaphore <- struct{}{}        // Acquire
-			defer func() { <-semaphore }() // Release
-			results[idx] = FetchFeed(ctx, f)
-		}(i, feed)
+		g.Go(func() error {
+			results[i] = FetchFeed(ctx, feed)
+			if progress != nil {
+				progress.Add(1)
+			}
+			return nil
+		})
 	}
-
-	wg.Wait()
+	_ = g.Wait()
 	return results
 }
 

@@ -295,10 +295,11 @@ func runServer(ctx context.Context) error {
 		return webServer.ListenAndServe(ctx)
 	})
 
-	g.Go(func() error {
+	g.Go(func() (err error) {
+		// A dead scheduler must stop the process rather than leave the servers running without it.
 		defer func() {
 			if r := recover(); r != nil {
-				logger.Error("scheduler panic", "panic", r)
+				err = fmt.Errorf("scheduler panic: %v", r)
 			}
 		}()
 		sched.Start(ctx)
