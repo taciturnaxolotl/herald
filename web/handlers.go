@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"sort"
 	"time"
+
+	"github.com/taciturnaxolotl/herald/store"
 )
 
 const (
@@ -722,8 +724,6 @@ func (s *Server) handleKeepAlive(w http.ResponseWriter, r *http.Request, token s
 	}
 }
 
-const verifyTokenTTL = 7 * 24 * time.Hour
-
 type verifyPageData struct {
 	Token            string
 	Email            string
@@ -745,7 +745,7 @@ func (s *Server) handleVerify(w http.ResponseWriter, r *http.Request, token stri
 func (s *Server) handleVerifyGET(w http.ResponseWriter, r *http.Request, token string) {
 	ctx := r.Context()
 
-	v, err := s.store.GetVerificationByToken(ctx, token, verifyTokenTTL)
+	v, err := s.store.GetVerificationByToken(ctx, token, store.VerifyTokenTTL)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			s.handle404WithMessage(w, r, "Invalid Link", "This confirmation link is invalid or has expired.")
@@ -780,7 +780,7 @@ func (s *Server) handleVerifyGET(w http.ResponseWriter, r *http.Request, token s
 func (s *Server) handleVerifyPOST(w http.ResponseWriter, r *http.Request, token string) {
 	ctx := r.Context()
 
-	v, err := s.store.GetVerificationByToken(ctx, token, verifyTokenTTL)
+	v, err := s.store.GetVerificationByToken(ctx, token, store.VerifyTokenTTL)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			s.handle404WithMessage(w, r, "Invalid Link", "This confirmation link is invalid or has expired.")

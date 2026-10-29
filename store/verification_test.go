@@ -136,3 +136,36 @@ func TestDeleteStalePendingVerifications(t *testing.T) {
 		t.Fatalf("fresh row should remain (pending), got v=%v err=%v", v, err)
 	}
 }
+
+func TestEnsurePendingVerificationRotatesAgingToken(t *testing.T) {
+	db := setupTestDB(t)
+	ctx := context.Background()
+	user, _ := db.GetOrCreateUser(ctx, "fp", "key")
+
+	first, err := db.EnsurePendingVerification(ctx, user.ID, "a@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := db.EnsurePendingVerification(ctx, user.ID, "a@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.Token.String != first.Token.String {
+		t.Fatal("a fresh pending token should be reused")
+	}
+
+	old := time.Now().UTC().Add(-(VerifyTokenTTL - time.Hour))
+	if _, err := db.ExecContext(ctx, `UPDATE verified_emails SET token_created_at = ? WHERE id = ?`, old, first.ID); err != nil {
+		t.Fatal(err)
+	}
+	rotated, err := db.EnsurePendingVerification(ctx, user.ID, "a@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rotated.Token.String == first.Token.String {
+		t.Fatal("an aging token should be rotated before it is resent")
+	}
+	if _, err := db.GetVerificationByToken(ctx, rotated.Token.String, VerifyTokenTTL); err != nil {
+		t.Fatalf("rotated token should be valid: %v", err)
+	}
+}

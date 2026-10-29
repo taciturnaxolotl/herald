@@ -40,7 +40,7 @@ const (
 	verifyEmailCooldown  = 24 * time.Hour
 	verifyIPPerDay       = 5
 	verifyFPPerDay       = 3
-	staleVerificationAge = 7 * 24 * time.Hour // matches the confirmation link's TTL
+	staleVerificationAge = store.VerifyTokenTTL
 	secondsPerDay        = 86400.0
 )
 

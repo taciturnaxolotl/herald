@@ -38,30 +38,30 @@ func (db *DB) IsEmailVerified(ctx context.Context, userID int64, email string) (
 	return verifiedAt.Valid, nil
 }
 
-// EnsurePendingVerification returns the verification row for (user, email),
-// creating a pending one with a fresh token if none exists. An already
-// verified row is returned unchanged.
-func (db *DB) EnsurePendingVerification(ctx context.Context, userID int64, email string) (*Verification, error) {
-	v, err := db.getVerification(ctx, userID, email)
-	if err == nil {
-		return v, nil
-	}
-	if err != sql.ErrNoRows {
-		return nil, err
-	}
+// VerifyTokenTTL is how long a confirmation link stays valid.
+const VerifyTokenTTL = 7 * 24 * time.Hour
 
+// EnsurePendingVerification returns the verification row for (user, email),
+// creating a pending one if none exists. A pending token past half its TTL is
+// rotated so a resent link is never already dead; verified rows are returned
+// unchanged.
+func (db *DB) EnsurePendingVerification(ctx context.Context, userID int64, email string) (*Verification, error) {
 	token, err := generateToken()
 	if err != nil {
 		return nil, err
 	}
+	now := time.Now().UTC()
 
 	_, err = db.ExecContext(ctx,
 		`INSERT INTO verified_emails (user_id, email, token, token_created_at)
-		 VALUES (?, ?, ?, ?)`,
-		userID, email, token, time.Now().UTC(),
+		 VALUES (?, ?, ?, ?)
+		 ON CONFLICT(user_id, email) DO UPDATE SET token = excluded.token, token_created_at = excluded.token_created_at
+		 WHERE verified_emails.verified_at IS NULL
+		   AND (verified_emails.token IS NULL OR verified_emails.token_created_at IS NULL OR verified_emails.token_created_at < ?)`,
+		userID, email, token, now, now.Add(-VerifyTokenTTL/2),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("insert verification: %w", err)
+		return nil, fmt.Errorf("upsert verification: %w", err)
 	}
 	return db.getVerification(ctx, userID, email)
 }
@@ -202,7 +202,7 @@ func (db *DB) DeleteStalePendingVerifications(ctx context.Context, maxAge time.D
 		     SELECT 1 FROM verified_emails v
 		     WHERE v.user_id = configs.user_id AND v.email = configs.email
 		       AND v.verified_at IS NULL
-		       AND v.created_at < ?
+		       AND COALESCE(v.token_created_at, v.created_at) < ?
 		   )`,
 		cutoff,
 	); err != nil {
@@ -211,7 +211,7 @@ func (db *DB) DeleteStalePendingVerifications(ctx context.Context, maxAge time.D
 
 	res, err := db.ExecContext(ctx,
 		`DELETE FROM verified_emails
-		 WHERE verified_at IS NULL AND created_at < ?`,
+		 WHERE verified_at IS NULL AND COALESCE(token_created_at, created_at) < ?`,
 		cutoff,
 	)
 	if err != nil {
