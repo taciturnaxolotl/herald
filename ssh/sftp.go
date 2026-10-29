@@ -50,23 +50,21 @@ type sftpHandler struct {
 
 // Fileread for downloads
 func (h *sftpHandler) Fileread(r *sftp.Request) (io.ReaderAt, error) {
-	filename := strings.TrimPrefix(r.Filepath, "/")
-	if filename == "" || filename == "." {
+	filename, ok := requestPath(r.Filepath)
+	if !ok {
 		return nil, fmt.Errorf("invalid path")
 	}
-
 	cfg, err := h.store.GetConfig(h.session.Context(), h.user.ID, filename)
 	if err != nil {
 		return nil, fmt.Errorf("config not found: %w", err)
 	}
-
-	return &bytesReaderAt{data: []byte(cfg.RawText)}, nil
+	return strings.NewReader(cfg.RawText), nil
 }
 
 // Filewrite for uploads
 func (h *sftpHandler) Filewrite(r *sftp.Request) (io.WriterAt, error) {
-	filename := strings.TrimPrefix(r.Filepath, "/")
-	if filename == "" || filename == "." {
+	filename, ok := requestPath(r.Filepath)
+	if !ok {
 		return nil, fmt.Errorf("invalid filename")
 	}
 
@@ -81,14 +79,14 @@ func (h *sftpHandler) Filewrite(r *sftp.Request) (io.WriterAt, error) {
 
 // Filecmd handles file operations
 func (h *sftpHandler) Filecmd(r *sftp.Request) error {
-	filename := strings.TrimPrefix(r.Filepath, "/")
+	filename, ok := requestPath(r.Filepath)
 
 	switch r.Method {
 	case "Setstat":
 		// Allow setstat (used by scp)
 		return nil
 	case "Remove":
-		if filename == "" || filename == "." {
+		if !ok {
 			return fmt.Errorf("invalid filename")
 		}
 		return h.store.DeleteConfig(h.session.Context(), h.user.ID, filename)
@@ -115,9 +113,8 @@ func (h *sftpHandler) Filelist(r *sftp.Request) (sftp.ListerAt, error) {
 		}
 		return listerAt(infos), nil
 	case "Stat":
-		filename := strings.TrimPrefix(r.Filepath, "/")
-		if filename == "" || filename == "." || filename == "/" {
-			// Return root directory info
+		filename, ok := requestPath(r.Filepath)
+		if !ok || filename == "/" {
 			return listerAt{&dirInfo{}}, nil
 		}
 		cfg, err := h.store.GetConfig(h.session.Context(), h.user.ID, filename)
@@ -156,21 +153,6 @@ func (w *configWriter) WriteAt(p []byte, off int64) (int, error) {
 // Close ingests the upload; OpenSSH shows a failed close only as "Failure", so upload also reports to stderr.
 func (w *configWriter) Close() error {
 	return w.handler.upload(w.handler.session, w.handler.user, w.filename, string(w.buffer))
-}
-
-type bytesReaderAt struct {
-	data []byte
-}
-
-func (r *bytesReaderAt) ReadAt(p []byte, off int64) (int, error) {
-	if off >= int64(len(r.data)) {
-		return 0, io.EOF
-	}
-	n := copy(p, r.data[off:])
-	if n < len(p) {
-		return n, io.EOF
-	}
-	return n, nil
 }
 
 type listerAt []fs.FileInfo

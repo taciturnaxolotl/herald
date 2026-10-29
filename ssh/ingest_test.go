@@ -41,3 +41,22 @@ func TestFormatUploadError_SingularAndGeneric(t *testing.T) {
 		t.Errorf("unexpected generic output:\n%s", generic)
 	}
 }
+
+func TestValidateUploadName(t *testing.T) {
+	for name, ok := range map[string]bool{
+		"feeds.txt":       true,
+		"my digest.txt":   true,
+		"feeds.yaml":      false,
+		".txt":            false,
+		".hidden.txt":     false,
+		"dir/feeds.txt":   false,
+		"../feeds.txt":    false,
+		"evil\x1b[2J.txt": false,
+		"line\nbreak.txt": false,
+		strings.Repeat("a", maxFilenameLen) + ".txt": false,
+	} {
+		if err := validateUploadName(name); (err == nil) != ok {
+			t.Errorf("validateUploadName(%q) = %v, want ok=%v", name, err, ok)
+		}
+	}
+}

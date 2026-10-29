@@ -8,6 +8,7 @@ import (
 	"net"
 	"strings"
 	"time"
+	"unicode"
 
 	"charm.land/log/v2"
 	"charm.land/ssh"
@@ -45,8 +46,8 @@ func (u *uploader) ingest(ctx context.Context, user *store.User, remoteAddr net.
 	if !u.rateLimiter.Allow(fmt.Sprintf("upload:%d", user.ID)) {
 		return fmt.Errorf("rate limit exceeded, please try again later")
 	}
-	if !strings.HasSuffix(filename, ".txt") {
-		return fmt.Errorf("only .txt files are supported")
+	if err := validateUploadName(filename); err != nil {
+		return err
 	}
 	if len(content) > maxUploadBytes {
 		return fmt.Errorf("file too large (max 1MB)")
@@ -112,6 +113,33 @@ func (u *uploader) ingest(ctx context.Context, user *store.User, remoteAddr net.
 
 	u.logger.Info("config uploaded", "user_id", user.ID, "filename", filename, "feeds", len(parsed.Feeds), "verified", verified)
 	return nil
+}
+
+const maxFilenameLen = 128
+
+// validateUploadName holds scp and sftp uploads to one naming rule: a short,
+// printable .txt name with no directories, since names are echoed to terminals.
+func validateUploadName(name string) error {
+	switch {
+	case !strings.HasSuffix(name, ".txt"):
+		return errors.New("only .txt files are supported")
+	case name == ".txt" || strings.ContainsAny(name, "/\\") || strings.HasPrefix(name, "."):
+		return errors.New("upload a plain file name like feeds.txt, without directories")
+	case len(name) > maxFilenameLen:
+		return fmt.Errorf("file name too long (max %d characters)", maxFilenameLen)
+	}
+	for _, r := range name {
+		if !unicode.IsPrint(r) {
+			return errors.New("file name contains unprintable characters")
+		}
+	}
+	return nil
+}
+
+// requestPath turns a client path into a config name, or false for the root.
+func requestPath(p string) (string, bool) {
+	name := strings.TrimPrefix(p, "/")
+	return name, name != "" && name != "."
 }
 
 // formatUploadError renders a failure as a checklist, starting on a fresh line past scp's progress meter.
@@ -200,4 +228,22 @@ func syncFeeds(ctx context.Context, q *store.Queries, configID int64, feeds []co
 		}
 	}
 	return nil
+}
+
+// rateLimitIPKey derives a rate-limit bucket key from a client address. IPv4 is
+// keyed per address; IPv6 is keyed per /64, since a single host typically owns
+// a whole /64 and could otherwise rotate addresses to dodge the limit.
+func rateLimitIPKey(addr net.Addr) string {
+	host, _, err := net.SplitHostPort(addr.String())
+	if err != nil {
+		host = addr.String()
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return host
+	}
+	if v4 := ip.To4(); v4 != nil {
+		return v4.String()
+	}
+	return ip.Mask(net.CIDRMask(64, 128)).String() + "/64"
 }

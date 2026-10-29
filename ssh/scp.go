@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"net"
 	"path/filepath"
 	"time"
 
@@ -31,8 +30,7 @@ func (h *scpHandler) Glob(s ssh.Session, pattern string) ([]string, error) {
 
 	var matches []string
 	for _, cfg := range configs {
-		matched, _ := filepath.Match(pattern, cfg.Filename)
-		if matched || pattern == "*" || pattern == cfg.Filename {
+		if matched, _ := filepath.Match(pattern, cfg.Filename); matched {
 			matches = append(matches, cfg.Filename)
 		}
 	}
@@ -113,24 +111,6 @@ func (h *scpHandler) Write(s ssh.Session, entry *scp.FileEntry) (int64, error) {
 		return 0, err
 	}
 	return int64(len(content)), nil
-}
-
-// rateLimitIPKey derives a rate-limit bucket key from a client address. IPv4 is
-// keyed per address; IPv6 is keyed per /64, since a single host typically owns
-// a whole /64 and could otherwise rotate addresses to dodge the limit.
-func rateLimitIPKey(addr net.Addr) string {
-	host, _, err := net.SplitHostPort(addr.String())
-	if err != nil {
-		host = addr.String()
-	}
-	ip := net.ParseIP(host)
-	if ip == nil {
-		return host
-	}
-	if v4 := ip.To4(); v4 != nil {
-		return v4.String()
-	}
-	return ip.Mask(net.CIDRMask(64, 128)).String() + "/64"
 }
 
 type configFileInfo struct {
