@@ -472,3 +472,19 @@ func TestUpsertConfig(t *testing.T) {
 		t.Fatalf("upsert should update in place, got %+v", again)
 	}
 }
+
+func TestCleanupOldLogs(t *testing.T) {
+	db := setupTestDB(t)
+	ctx := context.Background()
+	user, _ := db.GetOrCreateUser(ctx, "fp", "key")
+	cfg, _ := db.CreateConfig(ctx, user.ID, "a.txt", "a@example.com", "0 8 * * *", true, false, "raw", time.Now())
+	_ = db.AddLog(ctx, cfg.ID, "info", "old")
+	_ = db.AddLog(ctx, cfg.ID, "info", "new")
+	if _, err := db.q.ExecContext(ctx, `UPDATE logs SET created_at = ? WHERE message = 'old'`, time.Now().UTC().AddDate(-1, 0, 0)); err != nil {
+		t.Fatal(err)
+	}
+	n, err := db.CleanupOldLogs(ctx, 30*24*time.Hour)
+	if err != nil || n != 1 {
+		t.Fatalf("CleanupOldLogs = %d, %v; want 1 deleted", n, err)
+	}
+}

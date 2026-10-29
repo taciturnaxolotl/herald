@@ -43,3 +43,12 @@ func (q *Queries) GetRecentLogs(ctx context.Context, userID int64, limit int) ([
 	}
 	return logs, nil
 }
+
+// CleanupOldLogs deletes log entries older than olderThan.
+func (q *Queries) CleanupOldLogs(ctx context.Context, olderThan time.Duration) (int64, error) {
+	result, err := q.q.ExecContext(ctx, `DELETE FROM logs WHERE created_at < ?`, time.Now().UTC().Add(-olderThan))
+	if err != nil {
+		return 0, fmt.Errorf("cleanup old logs: %w", err)
+	}
+	return result.RowsAffected()
+}

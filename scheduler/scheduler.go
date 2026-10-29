@@ -25,6 +25,7 @@ const (
 	cleanupInterval     = 24 * time.Hour
 	engagementInterval  = 7 * 24 * time.Hour
 	seenItemsRetention  = 6 * 30 * 24 * time.Hour // 6 months
+	logsRetention       = 6 * 30 * 24 * time.Hour
 	itemMaxAge          = 3 * 30 * 24 * time.Hour // 3 months
 	emailSendsRetention = 6 * 30                  // 6 months in days
 
@@ -108,6 +109,9 @@ func (s *Scheduler) cleanup(ctx context.Context) {
 		}},
 		{"email sends", func(ctx context.Context) (int64, error) {
 			return s.store.CleanupOldSends(ctx, emailSendsRetention)
+		}},
+		{"logs", func(ctx context.Context) (int64, error) {
+			return s.store.CleanupOldLogs(ctx, logsRetention)
 		}},
 		{"stale verifications", func(ctx context.Context) (int64, error) {
 			return s.store.DeleteStalePendingVerifications(ctx, staleVerificationAge)
