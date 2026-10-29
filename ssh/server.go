@@ -116,7 +116,6 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 
 func (s *Server) publicKeyHandler(ctx ssh.Context, key ssh.PublicKey) bool {
 	fp := store.FingerprintSlug(gossh.FingerprintSHA256(key))
-	pubkeyStr := string(gossh.MarshalAuthorizedKey(key))
 
 	// Rate limit authentication attempts by fingerprint
 	if !s.rateLimiter.Allow(fmt.Sprintf("auth:%s", fp)) {
@@ -129,16 +128,31 @@ func (s *Server) publicKeyHandler(ctx ssh.Context, key ssh.PublicKey) bool {
 		return false
 	}
 
-	user, err := s.store.GetOrCreateUser(ctx, fp, pubkeyStr)
-	if err != nil {
-		s.logger.Error("failed to get/create user", "err", err)
-		return false
-	}
-
-	ctx.SetValue("user", user)
-	ctx.SetValue("fingerprint", fp)
-	s.logger.Debug("authenticated user", "fingerprint", fp, "user_id", user.ID)
 	return true
+}
+
+type sessionUserKey struct{}
+
+// sessionUser loads (creating on first login) the account for the key the
+// session actually authenticated with. The auth callback also runs for
+// unsigned key queries and its results are cached, so it must not decide
+// identity or create accounts.
+func sessionUser(sess ssh.Session, st *store.DB) (*store.User, error) {
+	ctx := sess.Context()
+	if user, ok := ctx.Value(sessionUserKey{}).(*store.User); ok {
+		return user, nil
+	}
+	key := sess.PublicKey()
+	if key == nil {
+		return nil, errors.New("session has no authenticated public key")
+	}
+	fp := store.FingerprintSlug(gossh.FingerprintSHA256(key))
+	user, err := st.GetOrCreateUser(ctx, fp, string(gossh.MarshalAuthorizedKey(key)))
+	if err != nil {
+		return nil, fmt.Errorf("load user: %w", err)
+	}
+	ctx.SetValue(sessionUserKey{}, user)
+	return user, nil
 }
 
 func (s *Server) commandMiddleware(next ssh.Handler) ssh.Handler {
@@ -146,8 +160,9 @@ func (s *Server) commandMiddleware(next ssh.Handler) ssh.Handler {
 		cmd := sess.Command()
 		s.logger.Debug("commandMiddleware", "cmd", cmd, "len", len(cmd))
 
-		user, ok := sess.Context().Value("user").(*store.User)
-		if !ok {
+		user, err := sessionUser(sess, s.store)
+		if err != nil {
+			s.logger.Error("failed to load session user", "err", err)
 			println(sess, "Authentication error")
 			return
 		}
@@ -182,9 +197,8 @@ func (s *Server) commandMiddleware(next ssh.Handler) ssh.Handler {
 }
 
 func (s *Server) handleWelcome(sess ssh.Session, user *store.User) {
-	fp := sess.Context().Value("fingerprint").(string)
 	printf(sess, "Welcome to Herald!\n\n")
-	printf(sess, "Your fingerprint: %s\n\n", fp)
+	printf(sess, "Your fingerprint: %s\n\n", user.PubkeyFP)
 	printf(sess, "Upload a config with:\n")
 	printf(sess, "  scp feeds.txt %s:\n\n", sess.User())
 	printf(sess, "Commands:\n")

@@ -15,9 +15,9 @@ import (
 
 func SFTPHandler(up *uploader) func(ssh.Session) {
 	return func(s ssh.Session) {
-		user, ok := s.Context().Value("user").(*store.User)
-		if !ok {
-			up.logger.Error("SFTP: no user in context")
+		user, err := sessionUser(s, up.store)
+		if err != nil {
+			up.logger.Error("SFTP: failed to load session user", "err", err)
 			return
 		}
 
@@ -31,7 +31,7 @@ func SFTPHandler(up *uploader) func(ssh.Session) {
 		})
 
 		// Exit before Close: closing tears down the channel, losing exit-status (scp shows -1).
-		err := server.Serve()
+		err = server.Serve()
 		code := 0
 		if err != nil && !errors.Is(err, io.EOF) {
 			up.logger.Error("SFTP server error", "err", err)

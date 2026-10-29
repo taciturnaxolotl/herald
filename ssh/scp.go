@@ -20,9 +20,9 @@ type scpHandler struct {
 }
 
 func (h *scpHandler) Glob(s ssh.Session, pattern string) ([]string, error) {
-	user, ok := s.Context().Value("user").(*store.User)
-	if !ok {
-		return nil, fmt.Errorf("no user in context")
+	user, err := sessionUser(s, h.store)
+	if err != nil {
+		return nil, err
 	}
 
 	configs, err := h.store.ListConfigs(s.Context(), user.ID)
@@ -41,9 +41,9 @@ func (h *scpHandler) Glob(s ssh.Session, pattern string) ([]string, error) {
 }
 
 func (h *scpHandler) WalkDir(s ssh.Session, path string, fn fs.WalkDirFunc) error {
-	user, ok := s.Context().Value("user").(*store.User)
-	if !ok {
-		return fmt.Errorf("no user in context")
+	user, err := sessionUser(s, h.store)
+	if err != nil {
+		return err
 	}
 
 	configs, err := h.store.ListConfigs(s.Context(), user.ID)
@@ -65,9 +65,9 @@ func (h *scpHandler) NewDirEntry(s ssh.Session, name string) (*scp.DirEntry, err
 }
 
 func (h *scpHandler) NewFileEntry(s ssh.Session, name string) (*scp.FileEntry, func() error, error) {
-	user, ok := s.Context().Value("user").(*store.User)
-	if !ok {
-		return nil, nil, fmt.Errorf("no user in context")
+	user, err := sessionUser(s, h.store)
+	if err != nil {
+		return nil, nil, err
 	}
 
 	cfg, err := h.store.GetConfig(s.Context(), user.ID, name)
@@ -96,9 +96,9 @@ func (h *scpHandler) Mkdir(s ssh.Session, entry *scp.DirEntry) error {
 func (h *scpHandler) Write(s ssh.Session, entry *scp.FileEntry) (int64, error) {
 	h.logger.Debug("SCP Write called", "name", entry.Name, "size", entry.Size)
 
-	user, ok := s.Context().Value("user").(*store.User)
-	if !ok {
-		return 0, fmt.Errorf("no user in context")
+	user, err := sessionUser(s, h.store)
+	if err != nil {
+		return 0, err
 	}
 
 	// Read one byte past the cap so ingest's size check sees oversize files.
