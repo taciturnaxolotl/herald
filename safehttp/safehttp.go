@@ -27,12 +27,14 @@ const MaxBodyBytes = 10 << 20 // 10 MiB
 // helpers used in isPublicIP.
 var extraBlocked = func() []*net.IPNet {
 	cidrs := []string{
+		"0.0.0.0/8",       // "this network"
 		"100.64.0.0/10",   // RFC 6598 CGNAT (Tailscale uses this range)
 		"192.0.0.0/24",    // RFC 6890 IETF protocol assignments
 		"192.0.2.0/24",    // TEST-NET-1
 		"198.18.0.0/15",   // RFC 2544 benchmarking
 		"198.51.100.0/24", // TEST-NET-2
 		"203.0.113.0/24",  // TEST-NET-3
+		"240.0.0.0/4",     // reserved, includes broadcast
 		"64:ff9b::/96",    // NAT64
 		"100::/64",        // RFC 6666 discard-only
 	}
@@ -86,7 +88,8 @@ func controlDial(_, address string, _ syscall.RawConn) error {
 // hardenedTransport is shared across clients so connections are pooled. The
 // dialer's Control hook enforces the IP policy on every connection.
 var hardenedTransport = &http.Transport{
-	Proxy: http.ProxyFromEnvironment,
+	// No proxy: the dial check would only see the proxy, never the feed host.
+	Proxy: nil,
 	DialContext: (&net.Dialer{
 		Timeout:   10 * time.Second,
 		KeepAlive: 30 * time.Second,

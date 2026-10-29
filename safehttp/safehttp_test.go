@@ -22,6 +22,9 @@ func TestIsPublicIP(t *testing.T) {
 		"fd00::1",         // ULA
 		"fe80::1",         // link-local v6
 		"198.18.0.1",      // benchmarking
+		"0.1.2.3",         // "this network"
+		"240.0.0.1",       // reserved
+		"255.255.255.255", // broadcast
 	}
 	for _, s := range blocked {
 		if isPublicIP(net.ParseIP(s)) {
@@ -96,5 +99,16 @@ func TestControlAllowsPublic(t *testing.T) {
 	}
 	if err := controlDial("tcp", "127.0.0.1:80", nil); err == nil {
 		t.Error("controlDial allowed loopback")
+	}
+}
+
+func TestTransportIgnoresProxyEnvironment(t *testing.T) {
+	t.Setenv("HTTP_PROXY", "http://127.0.0.1:1")
+	t.Setenv("HTTPS_PROXY", "http://127.0.0.1:1")
+	if hardenedTransport.Proxy != nil {
+		req, _ := http.NewRequest("GET", "http://169.254.169.254/", nil)
+		if u, _ := hardenedTransport.Proxy(req); u != nil {
+			t.Fatalf("requests must not go through a proxy, got %s", u)
+		}
 	}
 }
