@@ -22,6 +22,7 @@ var migrations = []migration{
 	{"cascade config deletes and drop the unused digest column", rebuildConfigs},
 	{"store strip_image_hosts", storeStripImageHosts},
 	{"enforce uniqueness and drop redundant indexes", tightenIndexes},
+	{"drop never-recorded open and bounce tracking", dropEmailTracking},
 }
 
 // migrate applies pending migrations, each in its own transaction. Foreign
@@ -292,4 +293,14 @@ func tightenIndexes(ctx context.Context, tx *sql.Tx) error {
 	DROP INDEX IF EXISTS idx_email_sends_tracking_token;
 	`)
 	return err
+}
+
+// dropEmailTracking removes open and bounce columns that nothing ever wrote.
+func dropEmailTracking(ctx context.Context, tx *sql.Tx) error {
+	for _, col := range []string{"bounced", "bounce_reason", "opened", "opened_at"} {
+		if _, err := tx.ExecContext(ctx, `ALTER TABLE email_sends DROP COLUMN `+col); err != nil {
+			return err
+		}
+	}
+	return nil
 }
