@@ -201,3 +201,50 @@ func TestGetOrCreateUnsubscribeTokenIsStable(t *testing.T) {
 		t.Fatalf("token changed: %q then %q", a, b)
 	}
 }
+
+func TestTimesAreStoredInUTC(t *testing.T) {
+	db := setupTestDB(t)
+	ctx := context.Background()
+	user, _ := db.GetOrCreateUser(ctx, "fp", "key")
+	cfg, _ := db.CreateConfig(ctx, user.ID, "a.txt", "a@example.com", "0 8 * * *", false, "raw", time.Now())
+
+	// 08:30 in New York is 13:30 UTC: due at 13:00 UTC only if compared as UTC.
+	ny := time.FixedZone("EST", -5*3600)
+	next := time.Date(2026, 1, 1, 8, 30, 0, 0, ny)
+	if err := db.SetNextRun(ctx, cfg.ID, &next); err != nil {
+		t.Fatal(err)
+	}
+	var raw string
+	_ = db.q.QueryRowContext(ctx, `SELECT next_run || '' FROM configs WHERE id = ?`, cfg.ID).Scan(&raw)
+	if !strings.HasPrefix(raw, "2026-01-01 13:30:00") {
+		t.Fatalf("stored %q, want UTC", raw)
+	}
+	if due, _ := db.GetDueConfigs(ctx, time.Date(2026, 1, 1, 13, 0, 0, 0, time.UTC)); len(due) != 0 {
+		t.Fatal("not due until 13:30 UTC")
+	}
+}
+
+func TestNormalizeTimestampsConvertsOffsets(t *testing.T) {
+	db := setupTestDB(t)
+	ctx := context.Background()
+	if _, err := db.conn.ExecContext(ctx,
+		`INSERT INTO users (pubkey_fp, pubkey, created_at) VALUES ('a', 'k', '2026-01-01 08:30:00.5-05:00'), ('b', 'k', '2026-01-01 13:00:00')`); err != nil {
+		t.Fatal(err)
+	}
+	tx, _ := db.conn.BeginTx(ctx, nil)
+	if err := normalizeTimestamps(ctx, tx); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	var first string
+	_ = db.conn.QueryRowContext(ctx, `SELECT pubkey_fp FROM users ORDER BY created_at LIMIT 1`).Scan(&first)
+	if first != "b" {
+		t.Fatalf("13:00 UTC should sort before 08:30 EST (13:30 UTC), got %q first", first)
+	}
+	u, err := db.GetUserByFingerprint(ctx, "a")
+	if err != nil || !u.CreatedAt.Equal(time.Date(2026, 1, 1, 13, 30, 0, 5e8, time.UTC)) {
+		t.Fatalf("normalized time reads back as %v, %v", u.CreatedAt, err)
+	}
+}

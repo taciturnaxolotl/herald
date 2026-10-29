@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"time"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -14,6 +15,52 @@ type querier interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+// utcQuerier binds every time in UTC. SQLite compares timestamps as text, so
+// one stray local-time offset would sort wrongly against everything else.
+type utcQuerier struct{ querier }
+
+func (u utcQuerier) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	return u.querier.ExecContext(ctx, query, utcArgs(args)...)
+}
+
+func (u utcQuerier) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	return u.querier.QueryContext(ctx, query, utcArgs(args)...)
+}
+
+func (u utcQuerier) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
+	return u.querier.QueryRowContext(ctx, query, utcArgs(args)...)
+}
+
+func utcArgs(args []any) []any {
+	var out []any
+	for i, arg := range args {
+		var utc any
+		switch v := arg.(type) {
+		case time.Time:
+			utc = v.UTC()
+		case *time.Time:
+			if v == nil {
+				continue
+			}
+			t := v.UTC()
+			utc = &t
+		case sql.NullTime:
+			v.Time = v.Time.UTC()
+			utc = v
+		default:
+			continue
+		}
+		if out == nil {
+			out = append([]any(nil), args...)
+		}
+		out[i] = utc
+	}
+	if out == nil {
+		return args
+	}
+	return out
 }
 
 // Queries holds every data operation; run them on the DB directly or inside WithTx.
@@ -40,7 +87,7 @@ func Open(path string) (*DB, error) {
 		return nil, fmt.Errorf("ping database: %w", err)
 	}
 
-	db := &DB{Queries: Queries{q: conn}, conn: conn}
+	db := &DB{Queries: Queries{q: utcQuerier{conn}}, conn: conn}
 	if err := db.migrate(context.Background()); err != nil {
 		_ = conn.Close()
 		return nil, fmt.Errorf("migrate database: %w", err)
@@ -56,7 +103,7 @@ func (db *DB) WithTx(ctx context.Context, fn func(*Queries) error) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	if err := fn(&Queries{q: tx}); err != nil {
+	if err := fn(&Queries{q: utcQuerier{tx}}); err != nil {
 		return err
 	}
 	return tx.Commit()

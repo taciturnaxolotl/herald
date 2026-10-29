@@ -23,6 +23,7 @@ var migrations = []migration{
 	{"store strip_image_hosts", storeStripImageHosts},
 	{"enforce uniqueness and drop redundant indexes", tightenIndexes},
 	{"drop never-recorded open and bounce tracking", dropEmailTracking},
+	{"store every timestamp in UTC", normalizeTimestamps},
 }
 
 // migrate applies pending migrations, each in its own transaction. Foreign
@@ -300,6 +301,34 @@ func dropEmailTracking(ctx context.Context, tx *sql.Tx) error {
 	for _, col := range []string{"bounced", "bounce_reason", "opened", "opened_at"} {
 		if _, err := tx.ExecContext(ctx, `ALTER TABLE email_sends DROP COLUMN `+col); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+// timestampColumns lists every DATETIME column, for normalizeTimestamps.
+var timestampColumns = map[string][]string{
+	"users":              {"created_at"},
+	"configs":            {"last_run", "next_run", "created_at", "last_active_at"},
+	"feeds":              {"last_fetched"},
+	"seen_items":         {"seen_at"},
+	"logs":               {"created_at"},
+	"unsubscribe_tokens": {"created_at"},
+	"email_sends":        {"sent_at"},
+	"verified_emails":    {"verified_at", "token_created_at", "last_sent_at", "created_at"},
+}
+
+// normalizeTimestamps rewrites stored times, some written with a local offset,
+// to UTC in one text format, so text comparison orders them correctly.
+func normalizeTimestamps(ctx context.Context, tx *sql.Tx) error {
+	for table, cols := range timestampColumns {
+		for _, col := range cols {
+			_, err := tx.ExecContext(ctx, fmt.Sprintf(
+				`UPDATE %[1]s SET %[2]s = strftime('%%Y-%%m-%%d %%H:%%M:%%f', %[2]s) || '+00:00'
+				 WHERE %[2]s IS NOT NULL AND strftime('%%Y-%%m-%%d', %[2]s) IS NOT NULL`, table, col))
+			if err != nil {
+				return fmt.Errorf("%s.%s: %w", table, col, err)
+			}
 		}
 	}
 	return nil
