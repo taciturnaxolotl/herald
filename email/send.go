@@ -16,6 +16,7 @@ import (
 	"net/smtp"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -34,16 +35,20 @@ type SMTPConfig struct {
 	DKIMDomain         string
 }
 
+const smtpTimeout = 30 * time.Second
+
 type Mailer struct {
 	cfg          SMTPConfig
 	unsubBaseURL string
 	dkimKey      *rsa.PrivateKey
+	timeout      time.Duration
 }
 
 func NewMailer(cfg SMTPConfig, unsubBaseURL string) (*Mailer, error) {
 	m := &Mailer{
 		cfg:          cfg,
 		unsubBaseURL: unsubBaseURL,
+		timeout:      smtpTimeout,
 	}
 
 	// Parse DKIM private key if provided
@@ -86,72 +91,83 @@ func NewMailer(cfg SMTPConfig, unsubBaseURL string) (*Mailer, error) {
 	return m, nil
 }
 
-// ValidateConfig tests SMTP connectivity and auth
+// ValidateConfig tests SMTP connectivity and auth.
 func (m *Mailer) ValidateConfig() error {
-	addr := net.JoinHostPort(m.cfg.Host, fmt.Sprintf("%d", m.cfg.Port))
-
-	var auth smtp.Auth
-	if m.cfg.User != "" && m.cfg.Pass != "" {
-		auth = smtp.PlainAuth("", m.cfg.User, m.cfg.Pass, m.cfg.Host)
-	}
-
-	// Port 465 uses implicit TLS
-	if m.cfg.Port == 465 {
-		tlsConfig := &tls.Config{
-			ServerName: m.cfg.Host,
-			MinVersion: tls.VersionTLS12,
-		}
-
-		conn, err := tls.Dial("tcp", addr, tlsConfig)
-		if err != nil {
-			return fmt.Errorf("TLS dial: %w", err)
-		}
-		defer func() { _ = conn.Close() }()
-
-		client, err := smtp.NewClient(conn, m.cfg.Host)
-		if err != nil {
-			return fmt.Errorf("SMTP client: %w", err)
-		}
-		defer func() { _ = client.Close() }()
-
-		if auth != nil {
-			if err = client.Auth(auth); err != nil {
-				return fmt.Errorf("auth: %w", err)
-			}
-		}
-
-		return client.Quit()
-	}
-
-	// Port 587 uses STARTTLS
-	dialer := &net.Dialer{Timeout: 30 * time.Second}
-	conn, err := dialer.Dial("tcp", addr)
+	client, err := m.connect()
 	if err != nil {
-		return fmt.Errorf("dial: %w", err)
+		return err
 	}
-	defer func() { _ = conn.Close() }()
+	defer func() { _ = client.Close() }()
+	return client.Quit()
+}
+
+// connect dials the server (implicit TLS on 465, STARTTLS otherwise) and
+// authenticates. The whole session shares one deadline, so a server that
+// accepts and then goes silent cannot hang a send or startup.
+func (m *Mailer) connect() (*smtp.Client, error) {
+	addr := net.JoinHostPort(m.cfg.Host, strconv.Itoa(m.cfg.Port))
+	tlsConfig := &tls.Config{ServerName: m.cfg.Host, MinVersion: tls.VersionTLS12}
+	dialer := &net.Dialer{Timeout: m.timeout}
+
+	var conn net.Conn
+	var err error
+	if m.cfg.Port == 465 {
+		conn, err = tls.DialWithDialer(dialer, "tcp", addr, tlsConfig)
+	} else {
+		conn, err = dialer.Dial("tcp", addr)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("dial: %w", err)
+	}
+	if err := conn.SetDeadline(time.Now().Add(m.timeout)); err != nil {
+		_ = conn.Close()
+		return nil, fmt.Errorf("set deadline: %w", err)
+	}
 
 	client, err := smtp.NewClient(conn, m.cfg.Host)
 	if err != nil {
-		return fmt.Errorf("SMTP client: %w", err)
+		_ = conn.Close()
+		return nil, fmt.Errorf("SMTP client: %w", err)
+	}
+	if m.cfg.Port != 465 {
+		if err := client.StartTLS(tlsConfig); err != nil {
+			_ = client.Close()
+			return nil, fmt.Errorf("STARTTLS: %w", err)
+		}
+	}
+	if m.cfg.User != "" && m.cfg.Pass != "" {
+		if err := client.Auth(smtp.PlainAuth("", m.cfg.User, m.cfg.Pass, m.cfg.Host)); err != nil {
+			_ = client.Close()
+			return nil, fmt.Errorf("auth: %w", err)
+		}
+	}
+	return client, nil
+}
+
+// transmit delivers one already-built message.
+func (m *Mailer) transmit(to string, msg []byte) error {
+	client, err := m.connect()
+	if err != nil {
+		return err
 	}
 	defer func() { _ = client.Close() }()
 
-	// Start TLS before auth
-	tlsConfig := &tls.Config{
-		ServerName: m.cfg.Host,
-		MinVersion: tls.VersionTLS12,
+	if err := client.Mail(m.fromAddress()); err != nil {
+		return fmt.Errorf("mail from: %w", err)
 	}
-	if err = client.StartTLS(tlsConfig); err != nil {
-		return fmt.Errorf("STARTTLS: %w", err)
+	if err := client.Rcpt(to); err != nil {
+		return fmt.Errorf("rcpt to: %w", err)
 	}
-
-	if auth != nil {
-		if err = client.Auth(auth); err != nil {
-			return fmt.Errorf("auth: %w", err)
-		}
+	w, err := client.Data()
+	if err != nil {
+		return fmt.Errorf("data: %w", err)
 	}
-
+	if _, err := w.Write(msg); err != nil {
+		return fmt.Errorf("write: %w", err)
+	}
+	if err := w.Close(); err != nil {
+		return fmt.Errorf("close data: %w", err)
+	}
 	return client.Quit()
 }
 
@@ -219,7 +235,6 @@ func (m *Mailer) Send(to, subject, htmlBody, textBody, unsubToken, dashboardURL,
 // the shared path for digests and confirmation emails; callers supply any
 // headers beyond the base set.
 func (m *Mailer) deliver(to, subject, htmlBody, textBody string, extraHeaders map[string]string) error {
-	addr := net.JoinHostPort(m.cfg.Host, fmt.Sprintf("%d", m.cfg.Port))
 	boundary := "==herald-" + generateMessageIDToken() + "=="
 
 	// Fixed-order base headers for reproducible output. Real MUAs emit a
@@ -277,16 +292,7 @@ func (m *Mailer) deliver(to, subject, htmlBody, textBody string, extraHeaders ma
 		messageBytes = signed
 	}
 
-	var auth smtp.Auth
-	if m.cfg.User != "" && m.cfg.Pass != "" {
-		auth = smtp.PlainAuth("", m.cfg.User, m.cfg.Pass, m.cfg.Host)
-	}
-
-	if m.cfg.Port == 465 {
-		return m.sendWithTLS(addr, auth, to, messageBytes)
-	}
-
-	return m.sendWithSTARTTLS(addr, auth, to, messageBytes)
+	return m.transmit(to, messageBytes)
 }
 
 // fromAddress returns the bare address of the configured sender, which may be
@@ -342,114 +348,6 @@ func encodeQuotedPrintable(s string) string {
 	_, _ = w.Write([]byte(s))
 	_ = w.Close()
 	return buf.String()
-}
-
-func (m *Mailer) sendWithTLS(addr string, auth smtp.Auth, to string, msg []byte) error {
-	tlsConfig := &tls.Config{
-		ServerName: m.cfg.Host,
-		MinVersion: tls.VersionTLS12,
-	}
-
-	dialer := &net.Dialer{Timeout: 30 * time.Second}
-	conn, err := tls.DialWithDialer(dialer, "tcp", addr, tlsConfig)
-	if err != nil {
-		return fmt.Errorf("TLS dial: %w", err)
-	}
-	if err := conn.SetDeadline(time.Now().Add(30 * time.Second)); err != nil {
-		_ = conn.Close()
-		return fmt.Errorf("set deadline: %w", err)
-	}
-	defer func() { _ = conn.Close() }()
-
-	client, err := smtp.NewClient(conn, m.cfg.Host)
-	if err != nil {
-		return fmt.Errorf("SMTP client: %w", err)
-	}
-	defer func() { _ = client.Close() }()
-
-	if auth != nil {
-		if err = client.Auth(auth); err != nil {
-			return fmt.Errorf("auth: %w", err)
-		}
-	}
-
-	if err = client.Mail(m.fromAddress()); err != nil {
-		return fmt.Errorf("mail from: %w", err)
-	}
-
-	if err = client.Rcpt(to); err != nil {
-		return fmt.Errorf("rcpt to: %w", err)
-	}
-
-	w, err := client.Data()
-	if err != nil {
-		return fmt.Errorf("data: %w", err)
-	}
-
-	if _, err = w.Write(msg); err != nil {
-		return fmt.Errorf("write: %w", err)
-	}
-
-	if err = w.Close(); err != nil {
-		return fmt.Errorf("close data: %w", err)
-	}
-
-	return client.Quit()
-}
-
-func (m *Mailer) sendWithSTARTTLS(addr string, auth smtp.Auth, to string, msg []byte) error {
-	dialer := &net.Dialer{Timeout: 30 * time.Second}
-	conn, err := dialer.Dial("tcp", addr)
-	if err != nil {
-		return fmt.Errorf("dial: %w", err)
-	}
-	if err := conn.SetDeadline(time.Now().Add(30 * time.Second)); err != nil {
-		_ = conn.Close()
-		return fmt.Errorf("set deadline: %w", err)
-	}
-	defer func() { _ = conn.Close() }()
-
-	client, err := smtp.NewClient(conn, m.cfg.Host)
-	if err != nil {
-		return fmt.Errorf("SMTP client: %w", err)
-	}
-	defer func() { _ = client.Close() }()
-
-	if err = client.StartTLS(&tls.Config{
-		ServerName: m.cfg.Host,
-		MinVersion: tls.VersionTLS12,
-	}); err != nil {
-		return fmt.Errorf("STARTTLS: %w", err)
-	}
-
-	if auth != nil {
-		if err = client.Auth(auth); err != nil {
-			return fmt.Errorf("auth: %w", err)
-		}
-	}
-
-	if err = client.Mail(m.fromAddress()); err != nil {
-		return fmt.Errorf("mail from: %w", err)
-	}
-
-	if err = client.Rcpt(to); err != nil {
-		return fmt.Errorf("rcpt to: %w", err)
-	}
-
-	w, err := client.Data()
-	if err != nil {
-		return fmt.Errorf("data: %w", err)
-	}
-
-	if _, err = w.Write(msg); err != nil {
-		return fmt.Errorf("write: %w", err)
-	}
-
-	if err = w.Close(); err != nil {
-		return fmt.Errorf("close data: %w", err)
-	}
-
-	return client.Quit()
 }
 
 func (m *Mailer) signDKIM(message []byte) ([]byte, error) {
