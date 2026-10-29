@@ -2,10 +2,13 @@ package main
 
 import (
 	"context"
+	_ "embed"
 	"fmt"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
+	"syscall"
 	"time"
 
 	"charm.land/log/v2"
@@ -20,6 +23,9 @@ import (
 	"github.com/taciturnaxolotl/herald/web"
 	"golang.org/x/sync/errgroup"
 )
+
+//go:embed config.example.yaml
+var sampleConfig []byte
 
 var (
 	version    = "dev"
@@ -53,7 +59,7 @@ Upload a feed config via SCP, get email digests on a schedule.`,
 		rootCmd,
 		fang.WithVersion(version),
 		fang.WithCommit(commitHash),
-		fang.WithNotifySignal(os.Interrupt, os.Kill),
+		fang.WithNotifySignal(os.Interrupt, syscall.SIGTERM),
 	); err != nil {
 		os.Exit(1)
 	}
@@ -85,40 +91,7 @@ func initCmd() *cobra.Command {
 				return fmt.Errorf("config file already exists at %s", path)
 			}
 
-			sampleConfig := `# Herald Configuration
-
-host: 0.0.0.0
-ssh_port: 2222
-http_port: 8080
-
-# Public URL where Herald is accessible
-origin: http://localhost:8080
-
-# External SSH port (defaults to ssh_port if not set)
-# Use this when SSH is exposed through a different port publicly
-# external_ssh_port: 22
-
-# SSH host keys (generated on first run if missing)
-host_key_path: ./host_key
-
-# Database
-db_path: ./herald.db
-
-# SMTP
-smtp:
-  host: smtp.example.com
-  port: 587
-  user: sender@example.com
-  pass: ${SMTP_PASS}  # Env var substitution
-  from: herald@example.com
-
-# Auth
-allow_all_keys: true
-# allowed_keys:
-#   - "ssh-ed25519 AAAA... user@host"
-`
-
-			if err := os.WriteFile(path, []byte(sampleConfig), 0o600); err != nil {
+			if err := os.WriteFile(path, sampleConfig, 0o600); err != nil {
 				return fmt.Errorf("failed to write config file: %w", err)
 			}
 
@@ -148,7 +121,11 @@ write to a temp file, and open it in the browser.`,
 			if err := runPreview(cmd.Context(), args[0], outputFile, inline); err != nil {
 				return err
 			}
-			return exec.Command("open", outputFile).Run() //nolint:gosec // outputFile is from os.CreateTemp, not user-controlled
+			opener := "xdg-open"
+			if runtime.GOOS == "darwin" {
+				opener = "open"
+			}
+			return exec.Command(opener, outputFile).Run() //nolint:gosec // outputFile is from os.CreateTemp, not user-controlled
 		},
 	}
 
@@ -196,19 +173,9 @@ func runServer(ctx context.Context) error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
-	// Set log level from config
-	level := log.InfoLevel
-	switch strings.ToLower(cfg.LogLevel) {
-	case "debug":
-		level = log.DebugLevel
-	case "info":
-		level = log.InfoLevel
-	case "warn":
-		level = log.WarnLevel
-	case "error":
-		level = log.ErrorLevel
+	if level, err := log.ParseLevel(cfg.LogLevel); err == nil {
+		logger.SetLevel(level)
 	}
-	logger.SetLevel(level)
 
 	logger.Info("starting herald",
 		"ssh_port", cfg.SSHPort,
@@ -222,17 +189,7 @@ func runServer(ctx context.Context) error {
 	}
 	defer func() { _ = db.Close() }()
 
-	mailer, err := email.NewMailer(email.SMTPConfig{
-		Host:               cfg.SMTP.Host,
-		Port:               cfg.SMTP.Port,
-		User:               cfg.SMTP.User,
-		Pass:               cfg.SMTP.Pass,
-		From:               cfg.SMTP.From,
-		DKIMPrivateKey:     cfg.SMTP.DKIMPrivateKey,
-		DKIMPrivateKeyFile: cfg.SMTP.DKIMPrivateKeyFile,
-		DKIMSelector:       cfg.SMTP.DKIMSelector,
-		DKIMDomain:         cfg.SMTP.DKIMDomain,
-	}, cfg.Origin)
+	mailer, err := email.NewMailer(email.SMTPConfig(cfg.SMTP), cfg.Origin)
 	if err != nil {
 		return fmt.Errorf("failed to create mailer: %w", err)
 	}
