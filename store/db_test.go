@@ -449,3 +449,26 @@ func TestConfigExpiresAt(t *testing.T) {
 		t.Errorf("ExpiresAt after keep-alive = %v, want %v", got, want)
 	}
 }
+
+func TestUpsertConfig(t *testing.T) {
+	db := setupTestDB(t)
+	ctx := context.Background()
+	user, _ := db.GetOrCreateUser(ctx, "fp", "key")
+	next := time.Now().UTC().Add(time.Hour)
+
+	cfg, created, err := db.UpsertConfig(ctx, user.ID, "a.txt", "a@example.com", "0 8 * * *", true, false, "v1", nil)
+	if err != nil || !created {
+		t.Fatalf("first upsert = %v, created %v", err, created)
+	}
+	if cfg.Active() {
+		t.Error("a nil next run should store the config paused")
+	}
+
+	again, created, err := db.UpsertConfig(ctx, user.ID, "a.txt", "b@example.com", "0 9 * * *", true, true, "v2", &next)
+	if err != nil || created {
+		t.Fatalf("second upsert = %v, created %v", err, created)
+	}
+	if again.ID != cfg.ID || again.Email != "b@example.com" || again.RawText != "v2" || !again.Active() {
+		t.Fatalf("upsert should update in place, got %+v", again)
+	}
+}

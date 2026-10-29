@@ -79,15 +79,27 @@ func (q *Queries) CreateConfig(ctx context.Context, userID int64, filename, emai
 	}, nil
 }
 
-func (q *Queries) UpdateConfig(ctx context.Context, configID int64, email, cronExpr string, digest, inline bool, rawText string, nextRun time.Time) error {
-	_, err := q.q.ExecContext(ctx,
-		`UPDATE configs SET email = ?, cron_expr = ?, digest = ?, inline_content = ?, raw_text = ?, next_run = ? WHERE id = ?`,
-		email, cronExpr, digest, inline, rawText, nextRun, configID,
-	)
-	if err != nil {
-		return fmt.Errorf("update config: %w", err)
+// UpsertConfig creates or replaces the user's config named filename, reporting
+// whether it is new. A nil nextRun stores it paused.
+func (q *Queries) UpsertConfig(ctx context.Context, userID int64, filename, email, cronExpr string, digest, inline bool, rawText string, nextRun *time.Time) (cfg *Config, created bool, err error) {
+	var existing int
+	if err := q.q.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM configs WHERE user_id = ? AND filename = ?`, userID, filename,
+	).Scan(&existing); err != nil {
+		return nil, false, fmt.Errorf("check config: %w", err)
 	}
-	return nil
+	cfg, err = scanConfig(q.q.QueryRowContext(ctx,
+		`INSERT INTO configs (user_id, filename, email, cron_expr, digest, inline_content, raw_text, next_run)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(user_id, filename) DO UPDATE SET
+		   email = excluded.email, cron_expr = excluded.cron_expr, digest = excluded.digest,
+		   inline_content = excluded.inline_content, raw_text = excluded.raw_text, next_run = excluded.next_run
+		 RETURNING `+configCols,
+		userID, filename, email, cronExpr, digest, inline, rawText, nextRun))
+	if err != nil {
+		return nil, false, fmt.Errorf("upsert config: %w", err)
+	}
+	return cfg, existing == 0, nil
 }
 
 func (q *Queries) GetConfig(ctx context.Context, userID int64, filename string) (*Config, error) {

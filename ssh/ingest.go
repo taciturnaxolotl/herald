@@ -69,47 +69,35 @@ func (u *uploader) ingest(ctx context.Context, user *store.User, remoteAddr net.
 		return fmt.Errorf("failed to calculate next run: %w", err)
 	}
 
-	var cfg *store.Config
-	err = u.store.WithTx(ctx, func(q *store.Queries) error {
-		existingCfg, err := q.GetConfig(ctx, user.ID, filename)
-		if err == nil {
-			if err := q.UpdateConfig(ctx, existingCfg.ID, parsed.Email, parsed.CronExpr, parsed.Digest, parsed.Inline, content, nextRun); err != nil {
-				return fmt.Errorf("failed to update config: %w", err)
-			}
-			cfg = existingCfg
-			return syncFeeds(ctx, q, cfg.ID, parsed.Feeds, fetched)
-		}
+	// Confirmed opt-in: only a verified address is scheduled. A failed check
+	// holds the config paused rather than mailing an unconfirmed address.
+	verified, verifyErr := u.store.IsEmailVerified(ctx, user.ID, parsed.Email)
+	if verifyErr != nil {
+		u.logger.Warn("verification check failed, holding config inactive", "err", verifyErr)
+	}
+	var schedule *time.Time
+	if verified {
+		schedule = &nextRun
+	}
 
-		cfg, err = q.CreateConfig(ctx, user.ID, filename, parsed.Email, parsed.CronExpr, parsed.Digest, parsed.Inline, content, nextRun)
+	err = u.store.WithTx(ctx, func(q *store.Queries) error {
+		cfg, created, err := q.UpsertConfig(ctx, user.ID, filename, parsed.Email, parsed.CronExpr, parsed.Digest, parsed.Inline, content, schedule)
 		if err != nil {
-			return fmt.Errorf("failed to create config: %w", err)
+			return err
 		}
-		for _, feed := range parsed.Feeds {
-			if _, err := q.CreateFeed(ctx, cfg.ID, feed.URL, feed.Name); err != nil {
-				return fmt.Errorf("failed to create feed: %w", err)
-			}
+		// A new config's first digest carries the feeds' current entries; feeds
+		// added to an existing config start from what is there now.
+		preseed := fetched
+		if created {
+			preseed = nil
 		}
-		return nil
+		return syncFeeds(ctx, q, cfg.ID, parsed.Feeds, preseed)
 	})
 	if err != nil {
 		return err
 	}
 
-	// Confirmed opt-in: a config only becomes active once the destination
-	// address is verified for this user. Until then keep it inactive and
-	// (rate-limited) send a confirmation email.
-	verified, err := u.store.IsEmailVerified(ctx, user.ID, parsed.Email)
-	if err != nil {
-		// Fail closed: an unanswered check holds the config rather than letting
-		// it run against an address nobody has confirmed.
-		u.logger.Warn("verification check failed, holding config inactive", "err", err)
-	}
-	if err != nil || !verified {
-		if err := u.store.SetNextRun(ctx, cfg.ID, nil); err != nil {
-			u.logger.Warn("failed to hold unverified config inactive", "err", err)
-		}
-	}
-	if err == nil && !verified {
+	if verifyErr == nil && !verified {
 		ipKey := ""
 		if remoteAddr != nil {
 			ipKey = rateLimitIPKey(remoteAddr)
@@ -168,9 +156,9 @@ func fetchFeeds(ctx context.Context, feeds []config.FeedEntry) (map[string][]sch
 	return items, nil
 }
 
-// syncFeeds reconciles an existing config's feeds with the parsed set: update
-// names of feeds that persist, create new ones (pre-seeding their current items
-// as seen), and delete those no longer present.
+// syncFeeds reconciles a config's feeds with the parsed set: update names of
+// feeds that persist, create new ones (marking their items in fetched as
+// seen), and delete those no longer present.
 func syncFeeds(ctx context.Context, q *store.Queries, configID int64, feeds []config.FeedEntry, fetched map[string][]scheduler.FetchedItem) error {
 	existingFeeds, err := q.GetFeedsByConfig(ctx, configID)
 	if err != nil {
