@@ -64,7 +64,7 @@ func TestValidateUploadName(t *testing.T) {
 func TestFormatUploadError_ListsBadLines(t *testing.T) {
 	_, err := config.Parse("=: email a@example.com\n=: emial b@example.com\nnonsense")
 	got := formatUploadError("daily.txt", err)
-	for _, want := range []string{"line 2: unknown setting \"emial\"", "line 3:", "Nothing was saved"} {
+	for _, want := range []string{"line 2: unknown setting \"emial\"", "line 3:"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("output missing %q:\n%s", want, got)
 		}

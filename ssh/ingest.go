@@ -164,7 +164,6 @@ func formatUploadError(filename string, err error) string {
 		for _, le := range lineErrs {
 			fmt.Fprintf(&b, "  line %d: %s\n", le.Line, le.Msg)
 		}
-		b.WriteString("\nNothing was saved. Fix these lines and upload again.\n")
 		return b.String()
 	}
 	fmt.Fprintf(&b, "\nherald: rejected %s: %v\nNothing was saved.\n", filename, err)
