@@ -416,3 +416,32 @@ func TestOpenUpgradesOldConfigsTable(t *testing.T) {
 		t.Fatalf("GetConfig after upgrade failed: %v", err)
 	}
 }
+
+func TestUpdateLastRunKeepsPausedConfigPaused(t *testing.T) {
+	db := setupTestDB(t)
+	ctx := context.Background()
+
+	user, _ := db.GetOrCreateUser(ctx, "fp", "key")
+	cfg, err := db.CreateConfig(ctx, user.ID, "a.txt", "a@example.com", "0 8 * * *", true, false, "raw", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpdateNextRun(ctx, cfg.ID, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := db.UpdateLastRun(ctx, cfg.ID, time.Now().UTC(), time.Now().UTC().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := db.GetConfigByID(ctx, cfg.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.NextRun.Valid {
+		t.Error("a manual run must not reschedule a paused config")
+	}
+	if !got.LastRun.Valid {
+		t.Error("last run should still be recorded")
+	}
+}

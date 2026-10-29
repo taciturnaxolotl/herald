@@ -244,7 +244,7 @@ func (db *DB) prepareStatements() error {
 	}
 
 	db.stmts.updateConfigRun, err = db.Prepare(
-		`UPDATE configs SET last_run = ?, next_run = ? WHERE id = ?`)
+		`UPDATE configs SET last_run = ?, next_run = CASE WHEN next_run IS NULL THEN NULL ELSE ? END WHERE id = ?`)
 	if err != nil {
 		return fmt.Errorf("prepare updateConfigRun: %w", err)
 	}

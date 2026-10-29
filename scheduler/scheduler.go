@@ -376,6 +376,10 @@ func (s *Scheduler) RunNow(ctx context.Context, configID int64, progress *atomic
 		return stats, fmt.Errorf("update last run: %w", err)
 	}
 
+	if !cfg.NextRun.Valid {
+		_ = s.store.AddLog(ctx, cfg.ID, "info", fmt.Sprintf("Processed: %d new items, digest is paused", totalNew))
+		return stats, nil
+	}
 	_ = s.store.AddLog(ctx, cfg.ID, "info", fmt.Sprintf("Processed: %d new items, next run: %s", totalNew, nextRun.Format(time.RFC3339)))
 
 	s.logger.Debug("RunNow: complete")

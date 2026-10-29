@@ -199,6 +199,7 @@ func (db *DB) DeleteConfig(ctx context.Context, userID int64, filename string) e
 	return nil
 }
 
+// UpdateLastRun records a run; a paused config (no next run) stays paused.
 func (db *DB) UpdateLastRun(ctx context.Context, configID int64, lastRun, nextRun time.Time) error {
 	_, err := db.stmts.updateConfigRun.ExecContext(ctx, lastRun, nextRun, configID)
 	if err != nil {
