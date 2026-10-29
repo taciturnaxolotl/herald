@@ -37,11 +37,12 @@ type Server struct {
 	commitHash  string
 	rateLimiter *ratelimit.Limiter
 	metrics     *Metrics
+	mux         *http.ServeMux
 }
 
 func NewServer(st *store.DB, addr string, origin string, sshPort int, logger *log.Logger, commitHash string) *Server {
 	tmpl := template.Must(template.ParseFS(templatesFS, "templates/*.html"))
-	return &Server{
+	s := &Server{
 		store:       st,
 		addr:        addr,
 		origin:      origin,
@@ -52,20 +53,47 @@ func NewServer(st *store.DB, addr string, origin string, sshPort int, logger *lo
 		rateLimiter: ratelimit.New(httpRequestsPerSecond, httpRateLimiterBurst),
 		metrics:     NewMetrics(),
 	}
+	s.mux = s.routes()
+	return s
+}
+
+func (s *Server) routes() *http.ServeMux {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /{$}", s.handleIndex)
+	mux.Handle("GET /style.css", staticFile(templatesFS, "templates/style.css", "text/css; charset=utf-8"))
+	mux.Handle("GET /favicon.svg", staticFile(publicFS, "public/favicon.svg", "image/svg+xml"))
+	mux.HandleFunc("GET /health", s.handleHealth)
+	mux.HandleFunc("GET /metrics", s.handleMetrics)
+
+	mux.HandleFunc("GET /unsubscribe/{token}", s.handleUnsubscribeGET)
+	mux.HandleFunc("POST /unsubscribe/{token}", s.handleUnsubscribePOST)
+	mux.HandleFunc("GET /verify/{token}", s.handleVerifyGET)
+	mux.HandleFunc("POST /verify/{token}", s.handleVerifyPOST)
+	mux.HandleFunc("GET /keep-alive/{token}", s.handleKeepAlive)
+	mux.HandleFunc("POST /keep-alive/{token}", s.handleKeepAlive)
+
+	mux.HandleFunc("GET /{fingerprint}", s.handleUser)
+	mux.HandleFunc("GET /{fingerprint}/{$}", s.handleUser)
+	mux.HandleFunc("GET /{fingerprint}/{file}", s.handleConfigOrFeed)
+	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) { s.notFound(w, "", "") })
+	return mux
+}
+
+func staticFile(fsys embed.FS, name, contentType string) http.Handler {
+	data, err := fsys.ReadFile(name)
+	if err != nil {
+		panic(err)
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", contentType)
+		_, _ = w.Write(data)
+	})
 }
 
 func (s *Server) ListenAndServe(ctx context.Context) error {
-	mux := http.NewServeMux()
-
-	mux.HandleFunc("/", s.routeHandler)
-	mux.HandleFunc("/style.css", s.handleStyleCSS)
-	mux.HandleFunc("/favicon.svg", s.handleFaviconSVG)
-	mux.HandleFunc("/health", s.handleHealth)
-	mux.HandleFunc("/metrics", s.handleMetrics)
-
 	srv := &http.Server{
 		Addr:              s.addr,
-		Handler:           s.loggingMiddleware(s.rateLimitMiddleware(mux)),
+		Handler:           s.loggingMiddleware(s.rateLimitMiddleware(s.mux)),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
@@ -171,48 +199,20 @@ func (lrw *loggingResponseWriter) WriteHeader(code int) {
 	lrw.ResponseWriter.WriteHeader(code)
 }
 
-func (s *Server) routeHandler(w http.ResponseWriter, r *http.Request) {
-	path := strings.Trim(r.URL.Path, "/")
-
-	if path == "" {
-		s.handleIndex(w, r)
-		return
-	}
-
-	parts := strings.Split(path, "/")
-
-	if len(parts) == 2 && parts[0] == "unsubscribe" {
-		s.handleUnsubscribe(w, r, parts[1])
-		return
-	}
-
-	if len(parts) == 2 && parts[0] == "keep-alive" {
-		s.handleKeepAlive(w, r, parts[1])
-		return
-	}
-
-	if len(parts) == 2 && parts[0] == "verify" {
-		s.handleVerify(w, r, parts[1])
-		return
-	}
-
-	switch len(parts) {
-	case 1:
-		s.handleUser(w, r, parts[0])
-	case 2:
-		if configFile, ok := strings.CutSuffix(parts[1], ".xml"); ok {
-			s.handleFeedXML(w, r, parts[0], configFile+".txt")
-		} else if configFile, ok := strings.CutSuffix(parts[1], ".json"); ok {
-			s.handleFeedJSON(w, r, parts[0], configFile+".txt")
-		} else {
-			s.handleConfig(w, r, parts[0], parts[1])
-		}
-	default:
-		s.notFound(w, "", "")
+// handleConfigOrFeed serves /fingerprint/name.txt as the raw config and
+// name.xml or name.json as that config's feed.
+func (s *Server) handleConfigOrFeed(w http.ResponseWriter, r *http.Request) {
+	fingerprint, file := r.PathValue("fingerprint"), r.PathValue("file")
+	if base, ok := strings.CutSuffix(file, ".xml"); ok {
+		s.handleFeedXML(w, r, fingerprint, base+".txt")
+	} else if base, ok := strings.CutSuffix(file, ".json"); ok {
+		s.handleFeedJSON(w, r, fingerprint, base+".txt")
+	} else {
+		s.handleConfig(w, r, fingerprint, file)
 	}
 }
 
-// feedPath is the inverse of the routing above: a config's generated feed path.
+// feedPath is the inverse of handleConfigOrFeed: a config's generated feed path.
 func feedPath(fingerprint, configFilename, ext string) string {
 	return "/" + fingerprint + "/" + strings.TrimSuffix(configFilename, ".txt") + ext
 }

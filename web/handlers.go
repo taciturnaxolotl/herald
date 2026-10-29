@@ -43,26 +43,6 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	s.render(w, http.StatusOK, "index.html", data)
 }
 
-func (s *Server) handleStyleCSS(w http.ResponseWriter, r *http.Request) {
-	css, err := templatesFS.ReadFile("templates/style.css")
-	if err != nil {
-		http.Error(w, "Not Found", http.StatusNotFound)
-		return
-	}
-	w.Header().Set("Content-Type", "text/css; charset=utf-8")
-	_, _ = w.Write(css)
-}
-
-func (s *Server) handleFaviconSVG(w http.ResponseWriter, r *http.Request) {
-	svg, err := publicFS.ReadFile("public/favicon.svg")
-	if err != nil {
-		http.Error(w, "Not Found", http.StatusNotFound)
-		return
-	}
-	w.Header().Set("Content-Type", "image/svg+xml")
-	_, _ = w.Write(svg)
-}
-
 type userPageData struct {
 	Fingerprint      string
 	ShortFingerprint string
@@ -84,8 +64,9 @@ type configInfo struct {
 	DaysUntilExpiry int
 }
 
-func (s *Server) handleUser(w http.ResponseWriter, r *http.Request, fingerprint string) {
+func (s *Server) handleUser(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	fingerprint := r.PathValue("fingerprint")
 
 	user, err := s.store.GetUserByFingerprint(ctx, fingerprint)
 	if err != nil {
@@ -333,7 +314,8 @@ type unsubscribePageData struct {
 	Error            string
 }
 
-func (s *Server) handleUnsubscribeGET(w http.ResponseWriter, r *http.Request, token string) {
+func (s *Server) handleUnsubscribeGET(w http.ResponseWriter, r *http.Request) {
+	token := r.PathValue("token")
 	ctx := r.Context()
 
 	cfg, err := s.store.GetConfigByToken(ctx, token)
@@ -360,7 +342,8 @@ func (s *Server) handleUnsubscribeGET(w http.ResponseWriter, r *http.Request, to
 	s.render(w, http.StatusOK, "unsubscribe.html", data)
 }
 
-func (s *Server) handleUnsubscribePOST(w http.ResponseWriter, r *http.Request, token string) {
+func (s *Server) handleUnsubscribePOST(w http.ResponseWriter, r *http.Request) {
+	token := r.PathValue("token")
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
@@ -412,17 +395,6 @@ func (s *Server) handleUnsubscribePOST(w http.ResponseWriter, r *http.Request, t
 	s.render(w, http.StatusOK, "unsubscribe.html", data)
 }
 
-func (s *Server) handleUnsubscribe(w http.ResponseWriter, r *http.Request, token string) {
-	switch r.Method {
-	case http.MethodGet:
-		s.handleUnsubscribeGET(w, r, token)
-	case http.MethodPost:
-		s.handleUnsubscribePOST(w, r, token)
-	default:
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
-	}
-}
-
 func stripProtocol(origin string) string {
 	if len(origin) == 0 {
 		return origin
@@ -464,7 +436,8 @@ type keepAlivePageData struct {
 
 // handleKeepAlive shows a confirm button on GET and renews only on POST, so
 // mail scanners that prefetch links cannot keep every digest alive.
-func (s *Server) handleKeepAlive(w http.ResponseWriter, r *http.Request, token string) {
+func (s *Server) handleKeepAlive(w http.ResponseWriter, r *http.Request) {
+	token := r.PathValue("token")
 	ctx := r.Context()
 
 	cfg, err := s.store.GetConfigByTrackingToken(ctx, token)
@@ -478,18 +451,13 @@ func (s *Server) handleKeepAlive(w http.ResponseWriter, r *http.Request, token s
 		ExpiresAt: time.Now().AddDate(0, 0, store.InactivityDays).Format("January 2, 2006"),
 	}
 
-	switch r.Method {
-	case http.MethodGet:
-	case http.MethodPost:
+	if r.Method == http.MethodPost {
 		if err := s.store.UpdateLastActive(ctx, token); err != nil {
 			s.logger.Error("keep-alive", "err", err)
 			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 			return
 		}
 		data.Success = true
-	default:
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
-		return
 	}
 
 	s.render(w, http.StatusOK, "keepalive.html", data)
@@ -502,18 +470,8 @@ type verifyPageData struct {
 	Success          bool
 }
 
-func (s *Server) handleVerify(w http.ResponseWriter, r *http.Request, token string) {
-	switch r.Method {
-	case http.MethodGet:
-		s.handleVerifyGET(w, r, token)
-	case http.MethodPost:
-		s.handleVerifyPOST(w, r, token)
-	default:
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
-	}
-}
-
-func (s *Server) handleVerifyGET(w http.ResponseWriter, r *http.Request, token string) {
+func (s *Server) handleVerifyGET(w http.ResponseWriter, r *http.Request) {
+	token := r.PathValue("token")
 	ctx := r.Context()
 
 	v, err := s.store.GetVerificationByToken(ctx, token, store.VerifyTokenTTL)
@@ -537,7 +495,8 @@ func (s *Server) handleVerifyGET(w http.ResponseWriter, r *http.Request, token s
 	s.render(w, http.StatusOK, "verify.html", data)
 }
 
-func (s *Server) handleVerifyPOST(w http.ResponseWriter, r *http.Request, token string) {
+func (s *Server) handleVerifyPOST(w http.ResponseWriter, r *http.Request) {
+	token := r.PathValue("token")
 	v, err := s.store.ConfirmVerification(r.Context(), token)
 	if err != nil {
 		s.fail(w, err, "confirm verification", "Invalid Link", "This confirmation link is invalid or has expired.")

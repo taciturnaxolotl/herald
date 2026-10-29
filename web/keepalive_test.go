@@ -41,7 +41,7 @@ func TestKeepAliveOnlyRenewsOnPost(t *testing.T) {
 	}
 
 	get := httptest.NewRecorder()
-	srv.routeHandler(get, httptest.NewRequest(http.MethodGet, "/keep-alive/"+token, nil))
+	srv.mux.ServeHTTP(get, httptest.NewRequest(http.MethodGet, "/keep-alive/"+token, nil))
 	if get.Code != http.StatusOK || !strings.Contains(get.Body.String(), "<form method=\"POST\">") {
 		t.Fatalf("GET should show a confirm form, got %d", get.Code)
 	}
@@ -50,7 +50,7 @@ func TestKeepAliveOnlyRenewsOnPost(t *testing.T) {
 	}
 
 	post := httptest.NewRecorder()
-	srv.routeHandler(post, httptest.NewRequest(http.MethodPost, "/keep-alive/"+token, nil))
+	srv.mux.ServeHTTP(post, httptest.NewRequest(http.MethodPost, "/keep-alive/"+token, nil))
 	if post.Code != http.StatusOK {
 		t.Fatalf("POST status = %d", post.Code)
 	}
@@ -59,7 +59,7 @@ func TestKeepAliveOnlyRenewsOnPost(t *testing.T) {
 	}
 
 	bad := httptest.NewRecorder()
-	srv.routeHandler(bad, httptest.NewRequest(http.MethodGet, "/keep-alive/nope", nil))
+	srv.mux.ServeHTTP(bad, httptest.NewRequest(http.MethodGet, "/keep-alive/nope", nil))
 	if bad.Code != http.StatusNotFound {
 		t.Fatalf("unknown token status = %d, want 404", bad.Code)
 	}

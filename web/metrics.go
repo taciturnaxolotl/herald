@@ -74,11 +74,6 @@ func (m *Metrics) Snapshot() MetricsSnapshot {
 
 // handleMetrics serves the /metrics endpoint
 func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
 	snapshot := s.metrics.Snapshot()
 
 	w.Header().Set("Content-Type", "application/json")
@@ -92,11 +87,6 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 
 // handleHealth serves the /health endpoint
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
 	// Simple health check - could be extended to check DB connection, etc.
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")

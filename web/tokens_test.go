@@ -29,7 +29,7 @@ func TestUnsubscribeDeleteRemovesAccount(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/unsubscribe/"+token, strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
-	srv.routeHandler(rec, req)
+	srv.mux.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body %q", rec.Code, rec.Body.String())
@@ -51,7 +51,7 @@ func TestOneClickUnsubscribePausesAndSpendsToken(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/unsubscribe/"+token, strings.NewReader("List-Unsubscribe=One-Click"))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		rec := httptest.NewRecorder()
-		srv.routeHandler(rec, req)
+		srv.mux.ServeHTTP(rec, req)
 		return rec.Code
 	}
 
@@ -79,13 +79,13 @@ func TestVerifyPostActivatesDigests(t *testing.T) {
 	}
 
 	get := httptest.NewRecorder()
-	srv.routeHandler(get, httptest.NewRequest(http.MethodGet, "/verify/"+v.Token.String, nil))
+	srv.mux.ServeHTTP(get, httptest.NewRequest(http.MethodGet, "/verify/"+v.Token.String, nil))
 	if ok, _ := st.IsEmailVerified(ctx, user.ID, "a@example.com"); ok {
 		t.Fatal("GET must not verify")
 	}
 
 	post := httptest.NewRecorder()
-	srv.routeHandler(post, httptest.NewRequest(http.MethodPost, "/verify/"+v.Token.String, nil))
+	srv.mux.ServeHTTP(post, httptest.NewRequest(http.MethodPost, "/verify/"+v.Token.String, nil))
 	if post.Code != http.StatusOK {
 		t.Fatalf("POST status = %d", post.Code)
 	}

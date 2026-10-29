@@ -22,7 +22,7 @@ func TestFeedJSONListsSeenItemsAndCaches(t *testing.T) {
 	_ = st.UpdateLastRun(ctx, cfg.ID, time.Now().UTC(), time.Now().UTC().Add(time.Hour))
 
 	rec := httptest.NewRecorder()
-	srv.routeHandler(rec, httptest.NewRequest(http.MethodGet, "/"+user.PubkeyFP+"/news.json", nil))
+	srv.mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/"+user.PubkeyFP+"/news.json", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d", rec.Code)
 	}
@@ -41,7 +41,7 @@ func TestFeedJSONListsSeenItemsAndCaches(t *testing.T) {
 	again := httptest.NewRequest(http.MethodGet, "/"+user.PubkeyFP+"/news.json", nil)
 	again.Header.Set("If-None-Match", "W/"+etag)
 	rec2 := httptest.NewRecorder()
-	srv.routeHandler(rec2, again)
+	srv.mux.ServeHTTP(rec2, again)
 	if rec2.Code != http.StatusNotModified {
 		t.Fatalf("matching weak ETag status = %d, want 304", rec2.Code)
 	}
