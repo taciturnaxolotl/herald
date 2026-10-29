@@ -4,6 +4,8 @@ package scheduler
 import (
 	"cmp"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -111,15 +113,12 @@ func FetchFeed(ctx context.Context, feed *store.Feed) *FetchResult {
 			Link:  item.Link,
 		}
 
-		if fetchedItem.GUID == "" {
-			fetchedItem.GUID = item.Link
-		}
-
 		if item.Content != "" {
 			fetchedItem.Content = item.Content
 		} else if item.Description != "" {
 			fetchedItem.Content = item.Description
 		}
+		fetchedItem.GUID = itemGUID(item.GUID, item.Link, item.Title, fetchedItem.Content)
 
 		if item.PublishedParsed != nil {
 			fetchedItem.Published = *item.PublishedParsed
@@ -168,4 +167,14 @@ type httpError struct {
 
 func (e *httpError) Error() string {
 	return fmt.Sprintf("server returned %d %s", e.StatusCode, http.StatusText(e.StatusCode))
+}
+
+// itemGUID identifies an item across fetches. Items with neither a GUID nor a
+// link fall back to a hash of their text, so they don't all collide on "".
+func itemGUID(guid, link, title, content string) string {
+	if id := cmp.Or(guid, link); id != "" {
+		return id
+	}
+	sum := sha256.Sum256([]byte(title + "\x00" + content))
+	return "sha256:" + hex.EncodeToString(sum[:])
 }
