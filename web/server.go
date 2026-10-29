@@ -151,19 +151,9 @@ func (s *Server) rateLimitMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// clientIP returns the real client address for rate limiting and logging.
-//
-// Herald runs behind a local Caddy reverse proxy, so every request arrives
-// from loopback and r.RemoteAddr is useless as an identity -- keying the rate
-// limiter on it collapses all clients into a single bucket. Caddy forwards the
-// real address in X-Forwarded-For.
-//
-// The header is only trusted when the direct peer is loopback (i.e. the proxy).
-// A direct connection to the HTTP port is keyed on its socket address instead,
-// so an attacker reaching the port cannot spoof arbitrary IPs via the header.
-// When trusted, the rightmost entry is used: that is the address the proxy
-// observed, whereas any values to its left were supplied by the client and
-// must not be believed.
+// clientIP returns the real client address. X-Forwarded-For is trusted only
+// from a loopback peer (the local Caddy proxy), and only its rightmost entry,
+// which is the address the proxy saw; anything to its left is client-supplied.
 func clientIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
