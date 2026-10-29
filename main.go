@@ -16,6 +16,7 @@ import (
 	"github.com/taciturnaxolotl/herald/scheduler"
 	"github.com/taciturnaxolotl/herald/ssh"
 	"github.com/taciturnaxolotl/herald/store"
+	"github.com/taciturnaxolotl/herald/verify"
 	"github.com/taciturnaxolotl/herald/web"
 	"golang.org/x/sync/errgroup"
 )
@@ -270,7 +271,7 @@ func runServer(ctx context.Context) error {
 		HostKeyPath:  cfg.HostKeyPath,
 		AllowAllKeys: cfg.AllowAllKeys,
 		AllowedKeys:  cfg.AllowedKeys,
-	}, db, sched, logger)
+	}, db, sched, verify.New(db, mailer, logger, cfg.Origin), logger)
 
 	// Get commit hash - prefer build-time embedded hash, fallback to git
 	hash := commitHash

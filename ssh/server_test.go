@@ -41,7 +41,7 @@ func TestSessionUserComesFromAuthenticatedKey(t *testing.T) {
 	}
 	defer func() { _ = st.Close() }()
 
-	srv := NewServer(Config{AllowAllKeys: true}, st, nil, log.New(io.Discard))
+	srv := NewServer(Config{AllowAllKeys: true}, st, nil, nil, log.New(io.Discard))
 	sshSrv := &ssh.Server{
 		PublicKeyHandler: srv.publicKeyHandler,
 		Handler: func(sess ssh.Session) {

@@ -28,8 +28,6 @@ func (m *fakeMailer) Send(_, _, _, _, _, _, _ string) error {
 	return nil
 }
 
-func (m *fakeMailer) SendVerification(_, _, _ string) error { return nil }
-
 func setup(t *testing.T, mailer *fakeMailer) (*Scheduler, *store.DB, *store.Config, *store.Feed) {
 	t.Helper()
 	st, err := store.Open(":memory:")

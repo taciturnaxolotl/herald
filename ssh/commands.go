@@ -13,6 +13,7 @@ import (
 	"charm.land/ssh"
 	"github.com/taciturnaxolotl/herald/scheduler"
 	"github.com/taciturnaxolotl/herald/store"
+	"github.com/taciturnaxolotl/herald/verify"
 )
 
 var (
@@ -45,7 +46,7 @@ func println(w io.Writer, args ...interface{}) {
 	_, _ = fmt.Fprintln(w, args...)
 }
 
-func HandleCommand(sess ssh.Session, user *store.User, st *store.DB, sched *scheduler.Scheduler, logger *log.Logger) {
+func HandleCommand(sess ssh.Session, user *store.User, st *store.DB, sched *scheduler.Scheduler, verifier *verify.Service, logger *log.Logger) {
 	cmd := sess.Command()
 	if len(cmd) == 0 {
 		return
@@ -91,7 +92,7 @@ func HandleCommand(sess ssh.Session, user *store.User, st *store.DB, sched *sche
 			println(sess, errorStyle.Render("Usage: verify <filename>"))
 			return
 		}
-		handleVerify(ctx, sess, user, st, sched, cmd[1])
+		handleVerify(ctx, sess, user, st, verifier, cmd[1])
 	case "logs":
 		handleLogs(ctx, sess, user, st)
 	default:
@@ -296,7 +297,7 @@ func handleRun(ctx context.Context, sess ssh.Session, user *store.User, st *stor
 // handleVerify re-sends the confirmation email for a config's address. The
 // scheduler owns the cooldown and the per-IP and per-key caps, so this is just
 // a way to ask again after the first link is lost or expired.
-func handleVerify(ctx context.Context, sess ssh.Session, user *store.User, st *store.DB, sched *scheduler.Scheduler, filename string) {
+func handleVerify(ctx context.Context, sess ssh.Session, user *store.User, st *store.DB, verifier *verify.Service, filename string) {
 	cfg, err := st.GetConfig(ctx, user.ID, filename)
 	if err != nil {
 		println(sess, errorStyle.Render("Config not found: "+filename))
@@ -308,20 +309,20 @@ func handleVerify(ctx context.Context, sess ssh.Session, user *store.User, st *s
 		ipKey = rateLimitIPKey(addr)
 	}
 
-	status, err := sched.RequestEmailVerification(ctx, user.ID, cfg.Email, user.PubkeyFP, ipKey)
+	status, err := verifier.Request(ctx, user.ID, cfg.Email, user.PubkeyFP, ipKey)
 	if err != nil {
 		println(sess, errorStyle.Render("Could not send confirmation: "+err.Error()))
 		return
 	}
 
 	switch status {
-	case scheduler.VerifyAlreadyVerified:
+	case verify.AlreadyVerified:
 		println(sess, successStyle.Render(cfg.Email+" is already verified."))
-	case scheduler.VerifySent:
+	case verify.Sent:
 		println(sess, successStyle.Render("Confirmation sent to "+cfg.Email))
-	case scheduler.VerifyPending:
+	case verify.Pending:
 		println(sess, dimStyle.Render("A confirmation was sent to "+cfg.Email+" recently. Check that mailbox, including spam."))
-	case scheduler.VerifyThrottled:
+	case verify.Throttled:
 		println(sess, errorStyle.Render("Too many confirmation requests. Try again tomorrow."))
 	}
 }

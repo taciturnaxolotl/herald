@@ -16,6 +16,7 @@ import (
 	"github.com/taciturnaxolotl/herald/ratelimit"
 	"github.com/taciturnaxolotl/herald/scheduler"
 	"github.com/taciturnaxolotl/herald/store"
+	"github.com/taciturnaxolotl/herald/verify"
 )
 
 const maxUploadBytes = 1024 * 1024 // 1 MiB
@@ -24,7 +25,7 @@ const maxUploadBytes = 1024 * 1024 // 1 MiB
 // scp), so both enforce identical limits, validation and opt-in gating.
 type uploader struct {
 	store       *store.DB
-	scheduler   *scheduler.Scheduler
+	verifier    *verify.Service
 	logger      *log.Logger
 	rateLimiter *ratelimit.Limiter
 }
@@ -113,7 +114,7 @@ func (u *uploader) ingest(ctx context.Context, user *store.User, remoteAddr net.
 		if remoteAddr != nil {
 			ipKey = rateLimitIPKey(remoteAddr)
 		}
-		status, err := u.scheduler.RequestEmailVerification(ctx, user.ID, parsed.Email, user.PubkeyFP, ipKey)
+		status, err := u.verifier.Request(ctx, user.ID, parsed.Email, user.PubkeyFP, ipKey)
 		if err != nil {
 			u.logger.Error("failed to request email verification", "email", parsed.Email, "err", err)
 		} else {

@@ -18,6 +18,7 @@ import (
 	"github.com/taciturnaxolotl/herald/ratelimit"
 	"github.com/taciturnaxolotl/herald/scheduler"
 	"github.com/taciturnaxolotl/herald/store"
+	"github.com/taciturnaxolotl/herald/verify"
 	gossh "golang.org/x/crypto/ssh"
 )
 
@@ -34,16 +35,18 @@ type Server struct {
 	allowedFPs  map[string]bool
 	store       *store.DB
 	scheduler   *scheduler.Scheduler
+	verifier    *verify.Service
 	logger      *log.Logger
 	rateLimiter *ratelimit.Limiter
 }
 
-func NewServer(cfg Config, st *store.DB, sched *scheduler.Scheduler, logger *log.Logger) *Server {
+func NewServer(cfg Config, st *store.DB, sched *scheduler.Scheduler, verifier *verify.Service, logger *log.Logger) *Server {
 	return &Server{
 		cfg:         cfg,
 		allowedFPs:  allowedFingerprints(cfg.AllowedKeys, logger),
 		store:       st,
 		scheduler:   sched,
+		verifier:    verifier,
 		logger:      logger,
 		rateLimiter: ratelimit.New(5, 10), // 5 req/sec, burst of 10 for SSH/SCP
 	}
@@ -70,7 +73,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 
 	up := &uploader{
 		store:       s.store,
-		scheduler:   s.scheduler,
+		verifier:    s.verifier,
 		logger:      s.logger,
 		rateLimiter: s.rateLimiter,
 	}
@@ -192,7 +195,7 @@ func (s *Server) commandMiddleware(next ssh.Handler) ssh.Handler {
 		}
 
 		// Handle our custom commands (ls, cat, rm, run, logs)
-		HandleCommand(sess, user, s.store, s.scheduler, s.logger)
+		HandleCommand(sess, user, s.store, s.scheduler, s.verifier, s.logger)
 	}
 }
 
