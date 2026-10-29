@@ -71,7 +71,7 @@ func (db *DB) RedeemUnsubscribeToken(ctx context.Context, token string, action U
 				return err
 			}
 		case DeleteAccount:
-			if err := q.deleteUser(ctx, cfg.UserID); err != nil {
+			if err := q.DeleteUser(ctx, cfg.UserID); err != nil {
 				return err
 			}
 		default:

@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"testing"
 )
 
@@ -50,5 +51,60 @@ func TestForeignKeysOnAfterMigrating(t *testing.T) {
 	}
 	if on != 1 {
 		t.Fatal("foreign keys must be re-enabled after migrations run")
+	}
+}
+
+func TestRebuildConfigsKeepsDataAndCascades(t *testing.T) {
+	path := t.TempDir() + "/old.db"
+	raw, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if _, err := raw.ExecContext(ctx, `PRAGMA foreign_keys = ON`); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := raw.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := baselineSchema(ctx, tx); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	_, err = raw.ExecContext(ctx, `
+		PRAGMA user_version = 1;
+		INSERT INTO users (id, pubkey_fp, pubkey) VALUES (1, 'fp', 'key');
+		INSERT INTO configs (id, user_id, filename, email, cron_expr, digest, raw_text, next_run) VALUES (7, 1, 'a.txt', 'a@example.com', '0 8 * * *', 0, 'raw', '2026-01-01 08:00:00');
+		INSERT INTO feeds (id, config_id, url) VALUES (3, 7, 'https://example.com/feed.xml');
+		INSERT INTO seen_items (feed_id, guid) VALUES (3, 'g');`)
+	_ = raw.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	cfg, err := db.GetConfigByID(ctx, 7)
+	if err != nil || cfg.Filename != "a.txt" || !cfg.Active() {
+		t.Fatalf("config not carried over: %+v %v", cfg, err)
+	}
+	if seen, _ := db.GetSeenGUIDs(ctx, 3, []string{"g"}); !seen["g"] {
+		t.Fatal("feeds and history under the config must survive the rebuild")
+	}
+
+	if err := db.DeleteUser(ctx, 1); err != nil {
+		t.Fatalf("delete user: %v", err)
+	}
+	var left int
+	_ = db.q.QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM configs) + (SELECT COUNT(*) FROM feeds) + (SELECT COUNT(*) FROM seen_items)`).Scan(&left)
+	if left != 0 {
+		t.Fatalf("deleting the user left %d dependent rows", left)
 	}
 }

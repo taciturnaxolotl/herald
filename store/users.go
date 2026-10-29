@@ -54,16 +54,8 @@ func (q *Queries) GetUserByID(ctx context.Context, userID int64) (*User, error) 
 	return scanUser(q.q.QueryRowContext(ctx, `SELECT id, pubkey_fp, pubkey, created_at FROM users WHERE id = ?`, userID))
 }
 
-func (db *DB) DeleteUser(ctx context.Context, userID int64) error {
-	return db.WithTx(ctx, func(q *Queries) error { return q.deleteUser(ctx, userID) })
-}
-
-// deleteUser must run in a transaction: configs.user_id has no ON DELETE
-// CASCADE, so configs go first.
-func (q *Queries) deleteUser(ctx context.Context, userID int64) error {
-	if _, err := q.q.ExecContext(ctx, `DELETE FROM configs WHERE user_id = ?`, userID); err != nil {
-		return fmt.Errorf("delete configs: %w", err)
-	}
+// DeleteUser removes a user; their configs, feeds and history go with them.
+func (q *Queries) DeleteUser(ctx context.Context, userID int64) error {
 	if _, err := q.q.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, userID); err != nil {
 		return fmt.Errorf("delete user: %w", err)
 	}

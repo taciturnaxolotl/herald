@@ -17,6 +17,7 @@ type migration struct {
 // migrations only ever grow at the end: never edit or reorder one that has shipped.
 var migrations = []migration{
 	{"baseline schema", baselineSchema},
+	{"cascade config deletes and drop the unused digest column", rebuildConfigs},
 }
 
 // migrate applies pending migrations, each in its own transaction. Foreign
@@ -202,4 +203,31 @@ func addColumnIfMissing(ctx context.Context, tx *sql.Tx, table, column, decl str
 		return fmt.Errorf("add %s.%s: %w", table, column, err)
 	}
 	return nil
+}
+
+// rebuildConfigs makes deleting a user delete their configs, and drops the
+// digest column nothing reads. SQLite cannot change a foreign key in place.
+func rebuildConfigs(ctx context.Context, tx *sql.Tx) error {
+	_, err := tx.ExecContext(ctx, `
+	CREATE TABLE configs_new (
+		id INTEGER PRIMARY KEY,
+		user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		filename TEXT NOT NULL,
+		email TEXT NOT NULL,
+		cron_expr TEXT NOT NULL,
+		inline_content BOOLEAN DEFAULT FALSE,
+		raw_text TEXT NOT NULL,
+		last_run DATETIME,
+		next_run DATETIME,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		last_active_at DATETIME,
+		UNIQUE(user_id, filename)
+	);
+	INSERT INTO configs_new (id, user_id, filename, email, cron_expr, inline_content, raw_text, last_run, next_run, created_at, last_active_at)
+		SELECT id, user_id, filename, email, cron_expr, inline_content, raw_text, last_run, next_run, created_at, last_active_at FROM configs;
+	DROP TABLE configs;
+	ALTER TABLE configs_new RENAME TO configs;
+	CREATE INDEX idx_configs_active_next_run ON configs(next_run) WHERE next_run IS NOT NULL;
+	`)
+	return err
 }
