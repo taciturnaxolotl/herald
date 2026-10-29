@@ -208,7 +208,7 @@ func (s *Server) routeHandler(w http.ResponseWriter, r *http.Request) {
 			s.handleConfig(w, r, parts[0], parts[1])
 		}
 	default:
-		s.handle404(w, r)
+		s.notFound(w, "", "")
 	}
 }
 

@@ -1,7 +1,6 @@
 package web
 
 import (
-	"context"
 	"database/sql"
 	"encoding/json"
 	"encoding/xml"
@@ -24,11 +23,7 @@ const (
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	host := parseOriginHost(s.origin)
 
-	// Get short commit hash (first 7 chars)
-	shortHash := s.commitHash
-	if len(shortHash) > 7 {
-		shortHash = shortHash[:7]
-	}
+	shortHash := short(s.commitHash, 7)
 
 	data := struct {
 		Origin          string
@@ -45,10 +40,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		CommitHash:      s.commitHash,
 		ShortCommitHash: shortHash,
 	}
-	if err := s.tmpl.ExecuteTemplate(w, "index.html", data); err != nil {
-		s.logger.Warn("render index", "err", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-	}
+	s.render(w, http.StatusOK, "index.html", data)
 }
 
 func (s *Server) handleStyleCSS(w http.ResponseWriter, r *http.Request) {
@@ -97,15 +89,7 @@ func (s *Server) handleUser(w http.ResponseWriter, r *http.Request, fingerprint 
 
 	user, err := s.store.GetUserByFingerprint(ctx, fingerprint)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			s.handle404(w, r)
-			return
-		}
-		if errors.Is(err, context.Canceled) {
-			return // Client disconnected, don't log as error
-		}
-		s.logger.Warn("get user", "err", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		s.fail(w, err, "get user", "", "")
 		return
 	}
 
@@ -182,10 +166,7 @@ func (s *Server) handleUser(w http.ResponseWriter, r *http.Request, fingerprint 
 		status = "ACTIVE"
 	}
 
-	shortFP := fingerprint
-	if len(shortFP) > shortFingerprintLen {
-		shortFP = shortFP[:shortFingerprintLen]
-	}
+	shortFP := short(fingerprint, shortFingerprintLen)
 
 	data := userPageData{
 		Fingerprint:      fingerprint,
@@ -196,10 +177,7 @@ func (s *Server) handleUser(w http.ResponseWriter, r *http.Request, fingerprint 
 		Origin:           s.origin,
 	}
 
-	if err := s.tmpl.ExecuteTemplate(w, "user.html", data); err != nil {
-		s.logger.Warn("render user", "err", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-	}
+	s.render(w, http.StatusOK, "user.html", data)
 }
 
 type rssItem struct {
@@ -230,28 +208,8 @@ type rssFeed struct {
 func (s *Server) handleFeedXML(w http.ResponseWriter, r *http.Request, fingerprint, configFilename string) {
 	ctx := r.Context()
 
-	user, err := s.store.GetUserByFingerprint(ctx, fingerprint)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			s.handle404(w, r)
-			return
-		}
-		if errors.Is(err, context.Canceled) {
-			return // Client disconnected
-		}
-		s.logger.Warn("get user", "err", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return
-	}
-
-	cfg, err := s.store.GetConfig(ctx, user.ID, configFilename)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			s.handle404(w, r)
-			return
-		}
-		s.logger.Warn("get config", "err", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+	cfg, ok := s.lookupConfig(w, r, fingerprint, configFilename)
+	if !ok {
 		return
 	}
 
@@ -314,7 +272,7 @@ func (s *Server) handleFeedXML(w http.ResponseWriter, r *http.Request, fingerpri
 	w.Header().Set("Content-Type", "application/rss+xml; charset=utf-8")
 	w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", feedCacheMaxAge))
 	if cfg.LastRun.Valid {
-		etag := fmt.Sprintf(`"%s-%d"`, fingerprint[:shortFingerprintLen], cfg.LastRun.Time.Unix())
+		etag := fmt.Sprintf(`"%s-%d"`, short(fingerprint, shortFingerprintLen), cfg.LastRun.Time.Unix())
 		w.Header().Set("ETag", etag)
 		w.Header().Set("Last-Modified", cfg.LastRun.Time.UTC().Format(http.TimeFormat))
 
@@ -362,28 +320,8 @@ type jsonFeedItemWithTime struct {
 func (s *Server) handleFeedJSON(w http.ResponseWriter, r *http.Request, fingerprint, configFilename string) {
 	ctx := r.Context()
 
-	user, err := s.store.GetUserByFingerprint(ctx, fingerprint)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			s.handle404(w, r)
-			return
-		}
-		if errors.Is(err, context.Canceled) {
-			return // Client disconnected
-		}
-		s.logger.Warn("get user", "err", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return
-	}
-
-	cfg, err := s.store.GetConfig(ctx, user.ID, configFilename)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			s.handle404(w, r)
-			return
-		}
-		s.logger.Warn("get config", "err", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+	cfg, ok := s.lookupConfig(w, r, fingerprint, configFilename)
+	if !ok {
 		return
 	}
 
@@ -444,7 +382,7 @@ func (s *Server) handleFeedJSON(w http.ResponseWriter, r *http.Request, fingerpr
 	w.Header().Set("Content-Type", "application/feed+json; charset=utf-8")
 	w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", feedCacheMaxAge))
 	if cfg.LastRun.Valid {
-		etag := fmt.Sprintf(`"%s-%d"`, fingerprint[:shortFingerprintLen], cfg.LastRun.Time.Unix())
+		etag := fmt.Sprintf(`"%s-%d"`, short(fingerprint, shortFingerprintLen), cfg.LastRun.Time.Unix())
 		w.Header().Set("ETag", etag)
 		w.Header().Set("Last-Modified", cfg.LastRun.Time.UTC().Format(http.TimeFormat))
 
@@ -469,30 +407,8 @@ func (s *Server) handleFeedJSON(w http.ResponseWriter, r *http.Request, fingerpr
 }
 
 func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request, fingerprint, filename string) {
-	ctx := r.Context()
-
-	user, err := s.store.GetUserByFingerprint(ctx, fingerprint)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			s.handle404(w, r)
-			return
-		}
-		if errors.Is(err, context.Canceled) {
-			return // Client disconnected
-		}
-		s.logger.Warn("get user", "err", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return
-	}
-
-	cfg, err := s.store.GetConfig(ctx, user.ID, filename)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			s.handle404(w, r)
-			return
-		}
-		s.logger.Warn("get config", "err", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+	cfg, ok := s.lookupConfig(w, r, fingerprint, filename)
+	if !ok {
 		return
 	}
 
@@ -515,12 +431,7 @@ func (s *Server) handleUnsubscribeGET(w http.ResponseWriter, r *http.Request, to
 
 	cfg, err := s.store.GetConfigByToken(ctx, token)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			s.handle404WithMessage(w, r, "Invalid Link", "This unsubscribe link is invalid or has expired.")
-			return
-		}
-		s.logger.Error("get config by token", "err", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		s.fail(w, err, "get config by token", "Invalid Link", "This unsubscribe link is invalid.")
 		return
 	}
 
@@ -531,10 +442,7 @@ func (s *Server) handleUnsubscribeGET(w http.ResponseWriter, r *http.Request, to
 		return
 	}
 
-	shortFP := user.PubkeyFP
-	if len(shortFP) > shortFingerprintLen {
-		shortFP = shortFP[:shortFingerprintLen]
-	}
+	shortFP := short(user.PubkeyFP, shortFingerprintLen)
 
 	data := unsubscribePageData{
 		Token:            token,
@@ -542,10 +450,7 @@ func (s *Server) handleUnsubscribeGET(w http.ResponseWriter, r *http.Request, to
 		Filename:         cfg.Filename,
 	}
 
-	if err := s.tmpl.ExecuteTemplate(w, "unsubscribe.html", data); err != nil {
-		s.logger.Warn("render unsubscribe", "err", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-	}
+	s.render(w, http.StatusOK, "unsubscribe.html", data)
 }
 
 func (s *Server) handleUnsubscribePOST(w http.ResponseWriter, r *http.Request, token string) {
@@ -577,7 +482,7 @@ func (s *Server) handleUnsubscribePOST(w http.ResponseWriter, r *http.Request, t
 		case oneClick:
 			http.Error(w, "Invalid token", http.StatusNotFound)
 		default:
-			s.handle404WithMessage(w, r, "Invalid Link", "This unsubscribe link is invalid or has expired.")
+			s.notFound(w, "Invalid Link", "This unsubscribe link is invalid or has expired.")
 		}
 		return
 	}
@@ -597,10 +502,7 @@ func (s *Server) handleUnsubscribePOST(w http.ResponseWriter, r *http.Request, t
 	}
 
 	data := unsubscribePageData{Success: true, Message: message}
-	if err := s.tmpl.ExecuteTemplate(w, "unsubscribe.html", data); err != nil {
-		s.logger.Warn("render unsubscribe", "err", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-	}
+	s.render(w, http.StatusOK, "unsubscribe.html", data)
 }
 
 func (s *Server) handleUnsubscribe(w http.ResponseWriter, r *http.Request, token string) {
@@ -660,12 +562,7 @@ func (s *Server) handleKeepAlive(w http.ResponseWriter, r *http.Request, token s
 
 	cfg, err := s.store.GetConfigByTrackingToken(ctx, token)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			s.handle404WithMessage(w, r, "Invalid Link", "This keep-alive link is invalid.")
-			return
-		}
-		s.logger.Error("get config by tracking token", "err", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		s.fail(w, err, "get config by tracking token", "Invalid Link", "This keep-alive link is invalid.")
 		return
 	}
 
@@ -688,10 +585,7 @@ func (s *Server) handleKeepAlive(w http.ResponseWriter, r *http.Request, token s
 		return
 	}
 
-	if err := s.tmpl.ExecuteTemplate(w, "keepalive.html", data); err != nil {
-		s.logger.Warn("render keepalive", "err", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-	}
+	s.render(w, http.StatusOK, "keepalive.html", data)
 }
 
 type verifyPageData struct {
@@ -717,21 +611,13 @@ func (s *Server) handleVerifyGET(w http.ResponseWriter, r *http.Request, token s
 
 	v, err := s.store.GetVerificationByToken(ctx, token, store.VerifyTokenTTL)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			s.handle404WithMessage(w, r, "Invalid Link", "This confirmation link is invalid or has expired.")
-			return
-		}
-		s.logger.Error("get verification by token", "err", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		s.fail(w, err, "get verification by token", "Invalid Link", "This confirmation link is invalid or has expired.")
 		return
 	}
 
 	shortFP := ""
 	if user, err := s.store.GetUserByID(ctx, v.UserID); err == nil {
-		shortFP = user.PubkeyFP
-		if len(shortFP) > shortFingerprintLen {
-			shortFP = shortFP[:shortFingerprintLen]
-		}
+		shortFP = short(user.PubkeyFP, shortFingerprintLen)
 	}
 
 	// A GET is only a landing page; confirmation happens on POST so that link
@@ -741,56 +627,18 @@ func (s *Server) handleVerifyGET(w http.ResponseWriter, r *http.Request, token s
 		Email:            v.Email,
 		ShortFingerprint: shortFP,
 	}
-	if err := s.tmpl.ExecuteTemplate(w, "verify.html", data); err != nil {
-		s.logger.Warn("render verify", "err", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-	}
+	s.render(w, http.StatusOK, "verify.html", data)
 }
 
 func (s *Server) handleVerifyPOST(w http.ResponseWriter, r *http.Request, token string) {
 	v, err := s.store.ConfirmVerification(r.Context(), token)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			s.handle404WithMessage(w, r, "Invalid Link", "This confirmation link is invalid or has expired.")
-			return
-		}
-		s.logger.Error("confirm verification", "err", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		s.fail(w, err, "confirm verification", "Invalid Link", "This confirmation link is invalid or has expired.")
 		return
 	}
 
 	s.logger.Info("email verified", "user_id", v.UserID, "email", v.Email)
 
 	data := verifyPageData{Email: v.Email, Success: true}
-	if err := s.tmpl.ExecuteTemplate(w, "verify.html", data); err != nil {
-		s.logger.Warn("render verify", "err", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-	}
-}
-
-func (s *Server) handle404(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusNotFound)
-	data := struct {
-		Title   string
-		Message string
-	}{}
-	if err := s.tmpl.ExecuteTemplate(w, "404.html", data); err != nil {
-		s.logger.Warn("render 404", "err", err)
-		http.Error(w, "Not Found", http.StatusNotFound)
-	}
-}
-
-func (s *Server) handle404WithMessage(w http.ResponseWriter, r *http.Request, title, message string) {
-	w.WriteHeader(http.StatusNotFound)
-	data := struct {
-		Title   string
-		Message string
-	}{
-		Title:   title,
-		Message: message,
-	}
-	if err := s.tmpl.ExecuteTemplate(w, "404.html", data); err != nil {
-		s.logger.Warn("render 404", "err", err)
-		http.Error(w, "Not Found", http.StatusNotFound)
-	}
+	s.render(w, http.StatusOK, "verify.html", data)
 }
