@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"testing"
 	"time"
+
+	"github.com/taciturnaxolotl/herald/config"
 )
 
 func setupTestDB(t *testing.T) *DB {
@@ -456,7 +458,7 @@ func TestUpsertConfig(t *testing.T) {
 	user, _ := db.GetOrCreateUser(ctx, "fp", "key")
 	next := time.Now().UTC().Add(time.Hour)
 
-	cfg, created, err := db.UpsertConfig(ctx, user.ID, "a.txt", "a@example.com", "0 8 * * *", false, "v1", nil)
+	cfg, created, err := db.UpsertConfig(ctx, user.ID, "a.txt", "v1", &config.ParsedConfig{Email: "a@example.com", CronExpr: "0 8 * * *"}, nil)
 	if err != nil || !created {
 		t.Fatalf("first upsert = %v, created %v", err, created)
 	}
@@ -464,11 +466,11 @@ func TestUpsertConfig(t *testing.T) {
 		t.Error("a nil next run should store the config paused")
 	}
 
-	again, created, err := db.UpsertConfig(ctx, user.ID, "a.txt", "b@example.com", "0 9 * * *", true, "v2", &next)
+	again, created, err := db.UpsertConfig(ctx, user.ID, "a.txt", "v2", &config.ParsedConfig{Email: "b@example.com", CronExpr: "0 9 * * *", Inline: true, StripImageHosts: []string{"a.example", "b.example"}}, &next)
 	if err != nil || created {
 		t.Fatalf("second upsert = %v, created %v", err, created)
 	}
-	if again.ID != cfg.ID || again.Email != "b@example.com" || again.RawText != "v2" || !again.Active() {
+	if again.ID != cfg.ID || again.Email != "b@example.com" || again.RawText != "v2" || !again.Active() || len(again.StripImageHosts) != 2 {
 		t.Fatalf("upsert should update in place, got %+v", again)
 	}
 }

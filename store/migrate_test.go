@@ -108,3 +108,36 @@ func TestRebuildConfigsKeepsDataAndCascades(t *testing.T) {
 		t.Fatalf("deleting the user left %d dependent rows", left)
 	}
 }
+
+func TestStoreStripImageHostsBackfills(t *testing.T) {
+	db := setupTestDB(t)
+	ctx := context.Background()
+	user, _ := db.GetOrCreateUser(ctx, "fp", "key")
+	if _, err := db.q.ExecContext(ctx,
+		`INSERT INTO configs (id, user_id, filename, email, cron_expr, raw_text) VALUES (9, ?, 'a.txt', 'a@example.com', '0 8 * * *', ?)`,
+		user.ID, "=: strip_image_hosts stickers.example, ads.example\n=: bogus line"); err != nil {
+		t.Fatal(err)
+	}
+
+	tx, err := db.conn.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.ExecContext(ctx, `ALTER TABLE configs DROP COLUMN strip_image_hosts`); err != nil {
+		t.Fatal(err)
+	}
+	if err := storeStripImageHosts(ctx, tx); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := db.GetConfigByID(ctx, 9)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.StripImageHosts) != 2 || cfg.StripImageHosts[0] != "stickers.example" {
+		t.Fatalf("backfilled hosts = %v", cfg.StripImageHosts)
+	}
+}

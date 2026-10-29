@@ -4,23 +4,25 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/taciturnaxolotl/herald/config"
 )
 
 type Config struct {
-	ID            int64
-	UserID        int64
-	Filename      string
-	Email         string
-	CronExpr      string
-	InlineContent bool
-	RawText       string
-	LastRun       sql.NullTime
-	NextRun       sql.NullTime
-	CreatedAt     time.Time
-	LastActiveAt  sql.NullTime
+	ID              int64
+	UserID          int64
+	Filename        string
+	Email           string
+	CronExpr        string
+	InlineContent   bool
+	RawText         string
+	LastRun         sql.NullTime
+	NextRun         sql.NullTime
+	CreatedAt       time.Time
+	LastActiveAt    sql.NullTime
+	StripImageHosts []string
 }
 
 // InactivityDays is how long a digest keeps sending without a keep-alive click.
@@ -38,15 +40,27 @@ func (c *Config) ExpiresAt() time.Time {
 	return base.AddDate(0, 0, InactivityDays)
 }
 
-const configCols = `id, user_id, filename, email, cron_expr, inline_content, raw_text, last_run, next_run, created_at, last_active_at`
+const configCols = `id, user_id, filename, email, cron_expr, inline_content, raw_text, last_run, next_run, created_at, last_active_at, strip_image_hosts`
 
 func scanConfig(s scanner) (*Config, error) {
 	var c Config
-	err := s.Scan(&c.ID, &c.UserID, &c.Filename, &c.Email, &c.CronExpr, &c.InlineContent, &c.RawText, &c.LastRun, &c.NextRun, &c.CreatedAt, &c.LastActiveAt)
+	var hosts string
+	err := s.Scan(&c.ID, &c.UserID, &c.Filename, &c.Email, &c.CronExpr, &c.InlineContent, &c.RawText, &c.LastRun, &c.NextRun, &c.CreatedAt, &c.LastActiveAt, &hosts)
 	if err != nil {
 		return nil, err
 	}
+	c.StripImageHosts = splitHosts(hosts)
 	return &c, nil
+}
+
+// Image hosts are stored comma-joined; host names cannot contain commas.
+func joinHosts(hosts []string) string { return strings.Join(hosts, ",") }
+
+func splitHosts(s string) []string {
+	if s == "" {
+		return nil
+	}
+	return strings.Split(s, ",")
 }
 
 func (q *Queries) CreateConfig(ctx context.Context, userID int64, filename, email, cronExpr string, inline bool, rawText string, nextRun time.Time) (*Config, error) {
@@ -77,9 +91,9 @@ func (q *Queries) CreateConfig(ctx context.Context, userID int64, filename, emai
 	}, nil
 }
 
-// UpsertConfig creates or replaces the user's config named filename, reporting
-// whether it is new. A nil nextRun stores it paused.
-func (q *Queries) UpsertConfig(ctx context.Context, userID int64, filename, email, cronExpr string, inline bool, rawText string, nextRun *time.Time) (cfg *Config, created bool, err error) {
+// UpsertConfig creates or replaces the user's config named filename from its
+// parsed text, reporting whether it is new. A nil nextRun stores it paused.
+func (q *Queries) UpsertConfig(ctx context.Context, userID int64, filename, rawText string, parsed *config.ParsedConfig, nextRun *time.Time) (cfg *Config, created bool, err error) {
 	var existing int
 	if err := q.q.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM configs WHERE user_id = ? AND filename = ?`, userID, filename,
@@ -87,13 +101,13 @@ func (q *Queries) UpsertConfig(ctx context.Context, userID int64, filename, emai
 		return nil, false, fmt.Errorf("check config: %w", err)
 	}
 	cfg, err = scanConfig(q.q.QueryRowContext(ctx,
-		`INSERT INTO configs (user_id, filename, email, cron_expr, inline_content, raw_text, next_run)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)
+		`INSERT INTO configs (user_id, filename, email, cron_expr, inline_content, raw_text, strip_image_hosts, next_run)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(user_id, filename) DO UPDATE SET
-		   email = excluded.email, cron_expr = excluded.cron_expr,
-		   inline_content = excluded.inline_content, raw_text = excluded.raw_text, next_run = excluded.next_run
+		   email = excluded.email, cron_expr = excluded.cron_expr, inline_content = excluded.inline_content,
+		   raw_text = excluded.raw_text, strip_image_hosts = excluded.strip_image_hosts, next_run = excluded.next_run
 		 RETURNING `+configCols,
-		userID, filename, email, cronExpr, inline, rawText, nextRun))
+		userID, filename, parsed.Email, parsed.CronExpr, parsed.Inline, rawText, joinHosts(parsed.StripImageHosts), nextRun))
 	if err != nil {
 		return nil, false, fmt.Errorf("upsert config: %w", err)
 	}

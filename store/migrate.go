@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+
+	"github.com/taciturnaxolotl/herald/config"
 )
 
 // A migration moves the schema forward one version. PRAGMA user_version
@@ -18,6 +20,7 @@ type migration struct {
 var migrations = []migration{
 	{"baseline schema", baselineSchema},
 	{"cascade config deletes and drop the unused digest column", rebuildConfigs},
+	{"store strip_image_hosts", storeStripImageHosts},
 }
 
 // migrate applies pending migrations, each in its own transaction. Foreign
@@ -230,4 +233,38 @@ func rebuildConfigs(ctx context.Context, tx *sql.Tx) error {
 	CREATE INDEX idx_configs_active_next_run ON configs(next_run) WHERE next_run IS NOT NULL;
 	`)
 	return err
+}
+
+// storeStripImageHosts saves each config's strip_image_hosts so sends need not
+// re-parse the raw config text.
+func storeStripImageHosts(ctx context.Context, tx *sql.Tx) error {
+	if _, err := tx.ExecContext(ctx, `ALTER TABLE configs ADD COLUMN strip_image_hosts TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT id, raw_text FROM configs`)
+	if err != nil {
+		return err
+	}
+	hosts := map[int64]string{}
+	for rows.Next() {
+		var id int64
+		var raw string
+		if err := rows.Scan(&id, &raw); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		// Saved configs may predate strict parsing, so take whatever parses.
+		if parsed, _ := config.Parse(raw); len(parsed.StripImageHosts) > 0 {
+			hosts[id] = joinHosts(parsed.StripImageHosts)
+		}
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return err
+	}
+	for id, h := range hosts {
+		if _, err := tx.ExecContext(ctx, `UPDATE configs SET strip_image_hosts = ? WHERE id = ?`, h, id); err != nil {
+			return err
+		}
+	}
+	return nil
 }

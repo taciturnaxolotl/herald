@@ -342,9 +342,7 @@ func (s *Scheduler) sendDigest(ctx context.Context, cfg *store.Config, batch dig
 		TotalItems: total,
 		FeedGroups: batch.groups,
 	}
-	// Configs saved before stricter parsing may have bad lines; keep the good ones.
-	parsed, _ := config.Parse(cfg.RawText)
-	digestData.StripImageHosts = parsed.StripImageHosts
+	digestData.StripImageHosts = cfg.StripImageHosts
 	inline := cfg.InlineContent && total <= maxInlineItems
 
 	// Every digest must carry a working unsubscribe link, so no token means no send.
