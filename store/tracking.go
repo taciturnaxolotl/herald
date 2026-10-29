@@ -36,17 +36,33 @@ func (q *Queries) DeactivateInactiveConfigs(ctx context.Context, minSends int) (
 	return configs, nil
 }
 
-// CountRecentSends returns how many digests a config was sent in the last days.
-func (q *Queries) CountRecentSends(ctx context.Context, configID int64, days int) (int, error) {
-	var n int
-	err := q.q.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM email_sends WHERE config_id = ? AND sent_at > ?`,
-		configID, time.Now().UTC().AddDate(0, 0, -days),
-	).Scan(&n)
-	if err != nil {
-		return 0, fmt.Errorf("count recent sends: %w", err)
+// CountRecentSends returns how many digests each config was sent in the last days.
+func (q *Queries) CountRecentSends(ctx context.Context, configIDs []int64, days int) (map[int64]int, error) {
+	counts := make(map[int64]int, len(configIDs))
+	if len(configIDs) == 0 {
+		return counts, nil
 	}
-	return n, nil
+	args := []any{time.Now().UTC().AddDate(0, 0, -days)}
+	for _, id := range configIDs {
+		args = append(args, id)
+	}
+	type row struct {
+		id    int64
+		count int
+	}
+	rows, err := queryAll(ctx, q.q, func(s scanner) (*row, error) {
+		var r row
+		return &r, s.Scan(&r.id, &r.count)
+	}, `SELECT config_id, COUNT(*) FROM email_sends
+	    WHERE sent_at > ? AND config_id IN (`+inClause(len(configIDs))+`)
+	    GROUP BY config_id`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("count recent sends: %w", err)
+	}
+	for _, r := range rows {
+		counts[r.id] = r.count
+	}
+	return counts, nil
 }
 
 // CleanupOldSends removes email send records older than specified days

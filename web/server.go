@@ -7,6 +7,7 @@ import (
 	"html/template"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -36,8 +37,17 @@ type Server struct {
 	tmpl        *template.Template
 	commitHash  string
 	rateLimiter *ratelimit.Limiter
-	metrics     *Metrics
+	metrics     *metrics
 	mux         *http.ServeMux
+	index       indexPageData
+}
+
+type indexPageData struct {
+	Origin          string
+	SSHHost         string
+	SSHPort         int
+	CommitHash      string
+	ShortCommitHash string
 }
 
 func NewServer(st *store.DB, addr string, origin string, sshPort int, logger *log.Logger, commitHash string) *Server {
@@ -51,7 +61,14 @@ func NewServer(st *store.DB, addr string, origin string, sshPort int, logger *lo
 		tmpl:        tmpl,
 		commitHash:  commitHash,
 		rateLimiter: ratelimit.New(httpRequestsPerSecond, httpRateLimiterBurst),
-		metrics:     NewMetrics(),
+		metrics:     &metrics{startTime: time.Now()},
+		index: indexPageData{
+			Origin:          origin,
+			SSHHost:         originHost(origin),
+			SSHPort:         sshPort,
+			CommitHash:      commitHash,
+			ShortCommitHash: short(commitHash, 7),
+		},
 	}
 	s.mux = s.routes()
 	return s
@@ -77,6 +94,15 @@ func (s *Server) routes() *http.ServeMux {
 	mux.HandleFunc("GET /{fingerprint}/{file}", s.handleConfigOrFeed)
 	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) { s.notFound(w, "", "") })
 	return mux
+}
+
+// originHost is the bare hostname users ssh to, from the public origin URL.
+func originHost(origin string) string {
+	u, err := url.Parse(origin)
+	if err != nil || u.Hostname() == "" {
+		return "localhost"
+	}
+	return u.Hostname()
 }
 
 func staticFile(fsys embed.FS, name, contentType string) http.Handler {
@@ -115,7 +141,7 @@ func (s *Server) rateLimitMiddleware(next http.Handler) http.Handler {
 		ip := clientIP(r)
 
 		if !s.rateLimiter.Allow(ip) {
-			s.metrics.RateLimitHits.Add(1)
+			s.metrics.rateLimitHits.Add(1)
 			s.logger.Warn("rate limit exceeded", "ip", ip, "path", r.URL.Path)
 			http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
 			return
@@ -164,9 +190,9 @@ func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 
-		s.metrics.RequestsTotal.Add(1)
-		s.metrics.RequestsActive.Add(1)
-		defer s.metrics.RequestsActive.Add(-1)
+		s.metrics.requestsTotal.Add(1)
+		s.metrics.requestsActive.Add(1)
+		defer s.metrics.requestsActive.Add(-1)
 
 		// Wrap response writer to capture status code
 		lrw := &loggingResponseWriter{ResponseWriter: w, statusCode: http.StatusOK}
@@ -184,7 +210,7 @@ func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
 		)
 
 		if lrw.statusCode >= 500 {
-			s.metrics.ErrorsTotal.Add(1)
+			s.metrics.errorsTotal.Add(1)
 		}
 	})
 }

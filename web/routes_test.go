@@ -44,3 +44,16 @@ func TestRoutes(t *testing.T) {
 		}
 	}
 }
+
+func TestOriginHost(t *testing.T) {
+	for origin, want := range map[string]string{
+		"https://herald.dunkirk.sh": "herald.dunkirk.sh",
+		"http://localhost:8080":     "localhost",
+		"http://[::1]:8080":         "::1",
+		"":                          "localhost",
+	} {
+		if got := originHost(origin); got != want {
+			t.Errorf("originHost(%q) = %q, want %q", origin, got, want)
+		}
+	}
+}

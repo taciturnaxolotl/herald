@@ -38,8 +38,8 @@
         {{if gt .TotalSends 0}}
         <br><span style="font-size: 0.9em; color: #666;">
             📧 {{.TotalSends}} sent
-            {{if ge .LastActiveDays 0}}
-                • last active {{.LastActiveDays}}d ago
+            {{with .LastActiveDays}}
+                • last active {{.}}d ago
             {{else}}
                 • never clicked keep-alive
             {{end}}

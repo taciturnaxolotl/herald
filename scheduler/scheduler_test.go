@@ -68,8 +68,8 @@ func TestSendDigestRecordsEvenIfCallerCancelsMidSend(t *testing.T) {
 	if err != nil || !seen["a"] {
 		t.Fatalf("sent item must be marked seen after a cancelled send, got %v %v", seen, err)
 	}
-	if n, _ := st.CountRecentSends(context.Background(), cfg.ID, 1); n != 1 {
-		t.Fatalf("send should be recorded, got %d", n)
+	if counts, _ := st.CountRecentSends(context.Background(), []int64{cfg.ID}, 1); counts[cfg.ID] != 1 {
+		t.Fatalf("send should be recorded, got %v", counts)
 	}
 }
 

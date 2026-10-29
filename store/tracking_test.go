@@ -44,11 +44,11 @@ func TestEmailTracking(t *testing.T) {
 	})
 
 	t.Run("CountRecentSends", func(t *testing.T) {
-		n, err := db.CountRecentSends(ctx, cfg.ID, 30)
+		counts, err := db.CountRecentSends(ctx, []int64{cfg.ID}, 30)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if n != 1 {
+		if n := counts[cfg.ID]; n != 1 {
 			t.Errorf("expected 1 recent send, got %d", n)
 		}
 	})
