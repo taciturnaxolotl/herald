@@ -65,3 +65,12 @@ func TestClientIP(t *testing.T) {
 		})
 	}
 }
+
+func TestFeedPath(t *testing.T) {
+	if got := feedPath("fp", "news.txt", ".json"); got != "/fp/news.json" {
+		t.Errorf("feedPath json = %q, want /fp/news.json", got)
+	}
+	if got := feedPath("fp", "news.txt", ".xml"); got != "/fp/news.xml" {
+		t.Errorf("feedPath xml = %q, want /fp/news.xml", got)
+	}
+}

@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
-	"strings"
 	"time"
 )
 
@@ -139,9 +138,6 @@ func (s *Server) handleUser(w http.ResponseWriter, r *http.Request, fingerprint 
 			hasAnyActive = true
 		}
 
-		// Generate feed URLs - trim .txt extension for cleaner URLs
-		feedBaseName := strings.TrimSuffix(cfg.Filename, ".txt")
-
 		// Get engagement stats (last 90 days)
 		totalSends, _, _, _, err := s.store.GetConfigEngagement(cfg.ID, 90)
 		if err != nil {
@@ -167,8 +163,8 @@ func (s *Server) handleUser(w http.ResponseWriter, r *http.Request, fingerprint 
 			Filename:        cfg.Filename,
 			FeedCount:       len(feeds),
 			URL:             "/" + fingerprint + "/" + cfg.Filename,
-			FeedXMLURL:      "/" + fingerprint + "/" + feedBaseName + ".xml",
-			FeedJSONURL:     "/" + fingerprint + "/" + feedBaseName + ".json",
+			FeedXMLURL:      feedPath(fingerprint, cfg.Filename, ".xml"),
+			FeedJSONURL:     feedPath(fingerprint, cfg.Filename, ".json"),
 			IsActive:        isActive,
 			TotalSends:      totalSends,
 			LastActiveDays:  lastActiveDays,
@@ -445,7 +441,7 @@ func (s *Server) handleFeedJSON(w http.ResponseWriter, r *http.Request, fingerpr
 		Version:     "https://jsonfeed.org/version/1.1",
 		Title:       "Herald - " + configFilename,
 		HomePageURL: s.origin + "/" + fingerprint + "/" + configFilename,
-		FeedURL:     s.origin + "/" + fingerprint + "/" + configFilename + ".json",
+		FeedURL:     s.origin + feedPath(fingerprint, configFilename, ".json"),
 		Items:       jsonItems,
 	}
 

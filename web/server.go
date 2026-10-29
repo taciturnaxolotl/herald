@@ -200,22 +200,19 @@ func (s *Server) routeHandler(w http.ResponseWriter, r *http.Request) {
 	case 1:
 		s.handleUser(w, r, parts[0])
 	case 2:
-		// Check if it's a feed file (ends with .xml or .json)
-		if strings.HasSuffix(parts[1], ".xml") {
-			// Extract base name by removing .xml extension, then append .txt to find config
-			baseName := strings.TrimSuffix(parts[1], ".xml")
-			configFile := baseName + ".txt"
-			s.handleFeedXML(w, r, parts[0], configFile)
-		} else if strings.HasSuffix(parts[1], ".json") {
-			// Extract base name by removing .json extension, then append .txt to find config
-			baseName := strings.TrimSuffix(parts[1], ".json")
-			configFile := baseName + ".txt"
-			s.handleFeedJSON(w, r, parts[0], configFile)
+		if configFile, ok := strings.CutSuffix(parts[1], ".xml"); ok {
+			s.handleFeedXML(w, r, parts[0], configFile+".txt")
+		} else if configFile, ok := strings.CutSuffix(parts[1], ".json"); ok {
+			s.handleFeedJSON(w, r, parts[0], configFile+".txt")
 		} else {
-			// Raw config file
 			s.handleConfig(w, r, parts[0], parts[1])
 		}
 	default:
 		s.handle404(w, r)
 	}
+}
+
+// feedPath is the inverse of the routing above: a config's generated feed path.
+func feedPath(fingerprint, configFilename, ext string) string {
+	return "/" + fingerprint + "/" + strings.TrimSuffix(configFilename, ".txt") + ext
 }
