@@ -96,6 +96,26 @@ func (q *Queries) GetVerificationByToken(ctx context.Context, token string, maxA
 	return &v, nil
 }
 
+// ConfirmVerification spends a confirmation token, marks the address
+// verified and schedules the user's digests for it, all or nothing.
+func (db *DB) ConfirmVerification(ctx context.Context, token string) (*Verification, error) {
+	var v *Verification
+	err := db.WithTx(ctx, func(q *Queries) error {
+		var err error
+		if v, err = q.GetVerificationByToken(ctx, token, VerifyTokenTTL); err != nil {
+			return err
+		}
+		if err := q.MarkEmailVerified(ctx, v.ID); err != nil {
+			return err
+		}
+		return q.ActivateConfigsForEmail(ctx, v.UserID, v.Email)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return v, nil
+}
+
 // MarkEmailVerified confirms a verification and clears its (now spent) token.
 func (q *Queries) MarkEmailVerified(ctx context.Context, id int64) error {
 	_, err := q.q.ExecContext(ctx,

@@ -55,14 +55,17 @@ func (q *Queries) GetUserByID(ctx context.Context, userID int64) (*User, error) 
 }
 
 func (db *DB) DeleteUser(ctx context.Context, userID int64) error {
-	return db.WithTx(ctx, func(q *Queries) error {
-		// configs.user_id has no ON DELETE CASCADE, so configs must go first.
-		if _, err := q.q.ExecContext(ctx, `DELETE FROM configs WHERE user_id = ?`, userID); err != nil {
-			return fmt.Errorf("delete configs: %w", err)
-		}
-		if _, err := q.q.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, userID); err != nil {
-			return fmt.Errorf("delete user: %w", err)
-		}
-		return nil
-	})
+	return db.WithTx(ctx, func(q *Queries) error { return q.deleteUser(ctx, userID) })
+}
+
+// deleteUser must run in a transaction: configs.user_id has no ON DELETE
+// CASCADE, so configs go first.
+func (q *Queries) deleteUser(ctx context.Context, userID int64) error {
+	if _, err := q.q.ExecContext(ctx, `DELETE FROM configs WHERE user_id = ?`, userID); err != nil {
+		return fmt.Errorf("delete configs: %w", err)
+	}
+	if _, err := q.q.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, userID); err != nil {
+		return fmt.Errorf("delete user: %w", err)
+	}
+	return nil
 }

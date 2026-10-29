@@ -556,93 +556,54 @@ func (s *Server) handleUnsubscribeGET(w http.ResponseWriter, r *http.Request, to
 }
 
 func (s *Server) handleUnsubscribePOST(w http.ResponseWriter, r *http.Request, token string) {
-	ctx := r.Context()
-
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
 	}
 
-	// RFC 8058: Check for one-click unsubscribe format
-	oneClick := r.FormValue("List-Unsubscribe")
-	if oneClick == "One-Click" {
-		// One-click unsubscribe: deactivate config without rendering HTML
-		cfg, err := s.store.GetConfigByToken(ctx, token)
-		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				http.Error(w, "Invalid token", http.StatusNotFound)
-				return
-			}
-			s.logger.Error("get config by token", "err", err)
-			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+	// RFC 8058 one-click unsubscribe pauses the digest and expects a plain reply.
+	oneClick := r.FormValue("List-Unsubscribe") == "One-Click"
+	action := store.PauseConfig
+	if !oneClick {
+		switch r.FormValue("action") {
+		case "deactivate":
+		case "delete":
+			action = store.DeleteAccount
+		default:
+			http.Error(w, "Invalid action", http.StatusBadRequest)
 			return
 		}
-
-		if err := s.store.SetNextRun(ctx, cfg.ID, nil); err != nil {
-			s.logger.Error("deactivate config", "err", err)
-			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-			return
-		}
-
-		if err := s.store.DeleteToken(ctx, token); err != nil {
-			s.logger.Warn("delete token", "err", err)
-		}
-
-		s.logger.Info("config deactivated via one-click", "config_id", cfg.ID, "filename", cfg.Filename)
-
-		// RFC 8058: Return success without redirect
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("Unsubscribed"))
-		return
 	}
 
-	// Manual unsubscribe flow
-	action := r.FormValue("action")
-	if action != "deactivate" && action != "delete" {
-		http.Error(w, "Invalid action", http.StatusBadRequest)
-		return
-	}
-
-	cfg, err := s.store.GetConfigByToken(ctx, token)
+	cfg, err := s.store.RedeemUnsubscribeToken(r.Context(), token, action)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		switch {
+		case !errors.Is(err, sql.ErrNoRows):
+			s.logger.Error("redeem unsubscribe token", "err", err)
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		case oneClick:
+			http.Error(w, "Invalid token", http.StatusNotFound)
+		default:
 			s.handle404WithMessage(w, r, "Invalid Link", "This unsubscribe link is invalid or has expired.")
-			return
 		}
-		s.logger.Error("get config by token", "err", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
 
 	var message string
-
-	if action == "deactivate" {
-		if err := s.store.SetNextRun(ctx, cfg.ID, nil); err != nil {
-			s.logger.Error("deactivate config", "err", err)
-			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-			return
-		}
-		message = fmt.Sprintf("Config '%s' deactivated. You will no longer receive emails for this config. Other configs remain active. Files remain accessible via SSH/SCP.", cfg.Filename)
-		s.logger.Info("config deactivated", "config_id", cfg.ID, "filename", cfg.Filename)
-	} else {
-		if err := s.store.DeleteUser(ctx, cfg.UserID); err != nil {
-			s.logger.Error("delete user", "err", err)
-			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-			return
-		}
+	if action == store.DeleteAccount {
 		message = "All data deleted. You have been completely removed from Herald."
 		s.logger.Info("user deleted", "user_id", cfg.UserID)
+	} else {
+		message = fmt.Sprintf("Config '%s' deactivated. You will no longer receive emails for this config. Other configs remain active. Files remain accessible via SSH/SCP.", cfg.Filename)
+		s.logger.Info("config deactivated", "config_id", cfg.ID, "filename", cfg.Filename, "one_click", oneClick)
 	}
 
-	if err := s.store.DeleteToken(ctx, token); err != nil {
-		s.logger.Warn("delete token", "err", err)
+	if oneClick {
+		_, _ = w.Write([]byte("Unsubscribed"))
+		return
 	}
 
-	data := unsubscribePageData{
-		Success: true,
-		Message: message,
-	}
-
+	data := unsubscribePageData{Success: true, Message: message}
 	if err := s.tmpl.ExecuteTemplate(w, "unsubscribe.html", data); err != nil {
 		s.logger.Warn("render unsubscribe", "err", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
@@ -794,30 +755,15 @@ func (s *Server) handleVerifyGET(w http.ResponseWriter, r *http.Request, token s
 }
 
 func (s *Server) handleVerifyPOST(w http.ResponseWriter, r *http.Request, token string) {
-	ctx := r.Context()
-
-	v, err := s.store.GetVerificationByToken(ctx, token, store.VerifyTokenTTL)
+	v, err := s.store.ConfirmVerification(r.Context(), token)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			s.handle404WithMessage(w, r, "Invalid Link", "This confirmation link is invalid or has expired.")
 			return
 		}
-		s.logger.Error("get verification by token", "err", err)
+		s.logger.Error("confirm verification", "err", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
-	}
-
-	if err := s.store.MarkEmailVerified(ctx, v.ID); err != nil {
-		s.logger.Error("mark email verified", "err", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return
-	}
-
-	// Now that the address is confirmed, schedule the user's configs for it.
-	if err := s.store.ActivateConfigsForEmail(ctx, v.UserID, v.Email); err != nil {
-		s.logger.Error("activate configs after verify", "err", err)
-		// The address is verified; a run will still get scheduled on next
-		// upload, so surface success rather than a 500.
 	}
 
 	s.logger.Info("email verified", "user_id", v.UserID, "email", v.Email)

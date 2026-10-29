@@ -45,3 +45,42 @@ func (q *Queries) GetOrCreateUnsubscribeToken(ctx context.Context, configID int6
 	}
 	return token, nil
 }
+
+// UnsubscribeAction is what redeeming an unsubscribe link does.
+type UnsubscribeAction int
+
+const (
+	// PauseConfig stops the one digest the link came from.
+	PauseConfig UnsubscribeAction = iota
+	// DeleteAccount removes the owner and every digest they have.
+	DeleteAccount
+)
+
+// RedeemUnsubscribeToken applies action and spends the token in one transaction.
+// It returns the config the token belonged to.
+func (db *DB) RedeemUnsubscribeToken(ctx context.Context, token string, action UnsubscribeAction) (*Config, error) {
+	var cfg *Config
+	err := db.WithTx(ctx, func(q *Queries) error {
+		var err error
+		if cfg, err = q.GetConfigByToken(ctx, token); err != nil {
+			return err
+		}
+		switch action {
+		case PauseConfig:
+			if err := q.SetNextRun(ctx, cfg.ID, nil); err != nil {
+				return err
+			}
+		case DeleteAccount:
+			if err := q.deleteUser(ctx, cfg.UserID); err != nil {
+				return err
+			}
+		default:
+			return fmt.Errorf("unknown unsubscribe action %d", action)
+		}
+		return q.DeleteToken(ctx, token)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return cfg, nil
+}
