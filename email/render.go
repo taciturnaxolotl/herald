@@ -42,10 +42,8 @@ type FeedItem struct {
 type templateFeedItem struct {
 	Title            string
 	Link             string
-	Content          string            // Original content (unused, kept for compatibility)
-	PlainContent     string            // HTML-stripped content for text template
-	SanitizedContent htmltemplate.HTML // Sanitized HTML for HTML template
-	Published        time.Time
+	PlainContent     string
+	SanitizedContent htmltemplate.HTML
 }
 
 // templateFeedGroup is used for template rendering with sanitized items
@@ -256,75 +254,41 @@ func DigestSubject(data *DigestData) string {
 	}
 }
 
-func RenderDigest(data *DigestData, inline bool, daysUntilExpiry int, showUrgentBanner, showWarningBanner bool) (html string, text string, err error) {
-	// Convert FeedGroups to templateFeedGroups with sanitized HTML content
-	sanitizedGroups := make([]templateFeedGroup, len(data.FeedGroups))
+func RenderDigest(data *DigestData, inline bool, daysUntilExpiry int) (html string, text string, err error) {
+	groups := make([]templateFeedGroup, len(data.FeedGroups))
 	for i, group := range data.FeedGroups {
-		sanitizedItems := make([]templateFeedItem, len(group.Items))
+		items := make([]templateFeedItem, len(group.Items))
 		for j, item := range group.Items {
-			sanitizedItems[j] = templateFeedItem{
+			items[j] = templateFeedItem{
 				Title:            item.Title,
 				Link:             item.Link,
-				Content:          item.Content,
 				PlainContent:     stripHTML(item.Content),
 				SanitizedContent: htmltemplate.HTML(sanitizeHTML(item.Content, entryURL(group.FeedURL, item.Link), data.StripImageHosts)), // #nosec G203 -- Content is sanitized by bluemonday before conversion
-				Published:        item.Published,
 			}
 		}
-		sanitizedGroups[i] = templateFeedGroup{
-			FeedName: group.FeedName,
-			FeedURL:  group.FeedURL,
-			Items:    sanitizedItems,
-		}
+		groups[i] = templateFeedGroup{FeedName: group.FeedName, FeedURL: group.FeedURL, Items: items}
 	}
 
-	// Prepare template data for HTML template (with sanitized content)
-	htmlTmplData := struct {
-		ConfigName        string
-		TotalItems        int
+	tmplData := struct {
 		FeedGroups        []templateFeedGroup
 		Inline            bool
 		DaysUntilExpiry   int
 		ShowUrgentBanner  bool
 		ShowWarningBanner bool
 	}{
-		ConfigName:        data.ConfigName,
-		TotalItems:        data.TotalItems,
-		FeedGroups:        sanitizedGroups,
+		FeedGroups:        groups,
 		Inline:            inline,
 		DaysUntilExpiry:   daysUntilExpiry,
-		ShowUrgentBanner:  showUrgentBanner,
-		ShowWarningBanner: showWarningBanner,
-	}
-
-	// Prepare template data for text template (with plain text content)
-	textTmplData := struct {
-		ConfigName        string
-		TotalItems        int
-		FeedGroups        []templateFeedGroup
-		Inline            bool
-		DaysUntilExpiry   int
-		ShowUrgentBanner  bool
-		ShowWarningBanner bool
-	}{
-		ConfigName:        data.ConfigName,
-		TotalItems:        data.TotalItems,
-		FeedGroups:        sanitizedGroups,
-		Inline:            inline,
-		DaysUntilExpiry:   daysUntilExpiry,
-		ShowUrgentBanner:  showUrgentBanner,
-		ShowWarningBanner: showWarningBanner,
+		ShowUrgentBanner:  daysUntilExpiry >= 0 && daysUntilExpiry <= 7,
+		ShowWarningBanner: daysUntilExpiry > 7 && daysUntilExpiry <= 30,
 	}
 
 	var htmlBuf, textBuf bytes.Buffer
-
-	if err = htmlTmpl.Execute(&htmlBuf, htmlTmplData); err != nil {
+	if err = htmlTmpl.Execute(&htmlBuf, tmplData); err != nil {
 		return "", "", err
 	}
-
-	if err = textTmpl.Execute(&textBuf, textTmplData); err != nil {
+	if err = textTmpl.Execute(&textBuf, tmplData); err != nil {
 		return "", "", err
 	}
-
 	return htmlBuf.String(), textBuf.String(), nil
 }

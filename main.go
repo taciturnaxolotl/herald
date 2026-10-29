@@ -193,7 +193,7 @@ func runPreview(ctx context.Context, feedURL, outputFile string, inline bool) er
 		},
 	}
 
-	htmlOutput, _, err := email.RenderDigest(data, inline, 30, false, false)
+	htmlOutput, _, err := email.RenderDigest(data, inline, 90)
 	if err != nil {
 		return fmt.Errorf("render digest: %w", err)
 	}

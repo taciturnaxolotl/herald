@@ -28,7 +28,7 @@ func TestRenderDigest_HTMLNotEscaped(t *testing.T) {
 	}
 
 	// Render with inline mode enabled
-	htmlOutput, _, err := RenderDigest(data, true, 30, false, false)
+	htmlOutput, _, err := RenderDigest(data, true, 90)
 	if err != nil {
 		t.Fatalf("RenderDigest failed: %v", err)
 	}
@@ -72,7 +72,7 @@ func TestRenderDigest_UnsafeHTMLStripped(t *testing.T) {
 	}
 
 	// Render with inline mode enabled
-	htmlOutput, _, err := RenderDigest(data, true, 30, false, false)
+	htmlOutput, _, err := RenderDigest(data, true, 90)
 	if err != nil {
 		t.Fatalf("RenderDigest failed: %v", err)
 	}
@@ -116,7 +116,7 @@ func TestRenderDigest_TextOutputNoHTMLTags(t *testing.T) {
 	}
 
 	// Render with inline mode enabled
-	_, textOutput, err := RenderDigest(data, true, 30, false, false)
+	_, textOutput, err := RenderDigest(data, true, 90)
 	if err != nil {
 		t.Fatalf("RenderDigest failed: %v", err)
 	}
@@ -158,7 +158,7 @@ func TestRenderDigest_TinyImagesStripped(t *testing.T) {
 		},
 	}
 
-	htmlOutput, _, err := RenderDigest(data, true, 30, false, false)
+	htmlOutput, _, err := RenderDigest(data, true, 90)
 	if err != nil {
 		t.Fatalf("RenderDigest failed: %v", err)
 	}
@@ -200,7 +200,7 @@ echo hello</pre><p>Done.</p>`,
 		},
 	}
 
-	htmlOutput, textOutput, err := RenderDigest(data, true, 30, false, false)
+	htmlOutput, textOutput, err := RenderDigest(data, true, 90)
 	if err != nil {
 		t.Fatalf("RenderDigest failed: %v", err)
 	}
