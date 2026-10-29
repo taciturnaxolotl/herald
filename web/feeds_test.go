@@ -14,7 +14,7 @@ func TestFeedJSONListsSeenItemsAndCaches(t *testing.T) {
 	ctx := context.Background()
 
 	user, _ := st.GetOrCreateUser(ctx, "SHA256:abcdefghijk", "key")
-	cfg, _ := st.CreateConfig(ctx, user.ID, "news.txt", "a@example.com", "0 8 * * *", true, false, "raw", time.Now())
+	cfg, _ := st.CreateConfig(ctx, user.ID, "news.txt", "a@example.com", "0 8 * * *", false, "raw", time.Now())
 	feedA, _ := st.CreateFeed(ctx, cfg.ID, "https://a.example/feed.xml", "")
 	feedB, _ := st.CreateFeed(ctx, cfg.ID, "https://b.example/feed.xml", "")
 	_ = st.MarkItemSeen(ctx, feedA.ID, "a1", "A one", "https://a.example/1")

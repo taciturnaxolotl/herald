@@ -15,7 +15,6 @@ type Config struct {
 	Filename      string
 	Email         string
 	CronExpr      string
-	Digest        bool
 	InlineContent bool
 	RawText       string
 	LastRun       sql.NullTime
@@ -39,22 +38,22 @@ func (c *Config) ExpiresAt() time.Time {
 	return base.AddDate(0, 0, InactivityDays)
 }
 
-const configCols = `id, user_id, filename, email, cron_expr, digest, inline_content, raw_text, last_run, next_run, created_at, last_active_at`
+const configCols = `id, user_id, filename, email, cron_expr, inline_content, raw_text, last_run, next_run, created_at, last_active_at`
 
 func scanConfig(s scanner) (*Config, error) {
 	var c Config
-	err := s.Scan(&c.ID, &c.UserID, &c.Filename, &c.Email, &c.CronExpr, &c.Digest, &c.InlineContent, &c.RawText, &c.LastRun, &c.NextRun, &c.CreatedAt, &c.LastActiveAt)
+	err := s.Scan(&c.ID, &c.UserID, &c.Filename, &c.Email, &c.CronExpr, &c.InlineContent, &c.RawText, &c.LastRun, &c.NextRun, &c.CreatedAt, &c.LastActiveAt)
 	if err != nil {
 		return nil, err
 	}
 	return &c, nil
 }
 
-func (q *Queries) CreateConfig(ctx context.Context, userID int64, filename, email, cronExpr string, digest, inline bool, rawText string, nextRun time.Time) (*Config, error) {
+func (q *Queries) CreateConfig(ctx context.Context, userID int64, filename, email, cronExpr string, inline bool, rawText string, nextRun time.Time) (*Config, error) {
 	result, err := q.q.ExecContext(ctx,
-		`INSERT INTO configs (user_id, filename, email, cron_expr, digest, inline_content, raw_text, next_run)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		userID, filename, email, cronExpr, digest, inline, rawText, nextRun,
+		`INSERT INTO configs (user_id, filename, email, cron_expr, inline_content, raw_text, next_run)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		userID, filename, email, cronExpr, inline, rawText, nextRun,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("insert config: %w", err)
@@ -71,7 +70,6 @@ func (q *Queries) CreateConfig(ctx context.Context, userID int64, filename, emai
 		Filename:      filename,
 		Email:         email,
 		CronExpr:      cronExpr,
-		Digest:        digest,
 		InlineContent: inline,
 		RawText:       rawText,
 		NextRun:       sql.NullTime{Time: nextRun, Valid: true},
@@ -81,7 +79,7 @@ func (q *Queries) CreateConfig(ctx context.Context, userID int64, filename, emai
 
 // UpsertConfig creates or replaces the user's config named filename, reporting
 // whether it is new. A nil nextRun stores it paused.
-func (q *Queries) UpsertConfig(ctx context.Context, userID int64, filename, email, cronExpr string, digest, inline bool, rawText string, nextRun *time.Time) (cfg *Config, created bool, err error) {
+func (q *Queries) UpsertConfig(ctx context.Context, userID int64, filename, email, cronExpr string, inline bool, rawText string, nextRun *time.Time) (cfg *Config, created bool, err error) {
 	var existing int
 	if err := q.q.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM configs WHERE user_id = ? AND filename = ?`, userID, filename,
@@ -89,13 +87,13 @@ func (q *Queries) UpsertConfig(ctx context.Context, userID int64, filename, emai
 		return nil, false, fmt.Errorf("check config: %w", err)
 	}
 	cfg, err = scanConfig(q.q.QueryRowContext(ctx,
-		`INSERT INTO configs (user_id, filename, email, cron_expr, digest, inline_content, raw_text, next_run)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		`INSERT INTO configs (user_id, filename, email, cron_expr, inline_content, raw_text, next_run)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(user_id, filename) DO UPDATE SET
-		   email = excluded.email, cron_expr = excluded.cron_expr, digest = excluded.digest,
+		   email = excluded.email, cron_expr = excluded.cron_expr,
 		   inline_content = excluded.inline_content, raw_text = excluded.raw_text, next_run = excluded.next_run
 		 RETURNING `+configCols,
-		userID, filename, email, cronExpr, digest, inline, rawText, nextRun))
+		userID, filename, email, cronExpr, inline, rawText, nextRun))
 	if err != nil {
 		return nil, false, fmt.Errorf("upsert config: %w", err)
 	}

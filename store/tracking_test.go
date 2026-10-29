@@ -14,7 +14,7 @@ func TestEmailTracking(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create user: %v", err)
 	}
-	cfg, err := db.CreateConfig(ctx, user.ID, "test.txt", "test@example.com", "0 0 * * *", true, false, "test config", time.Now().Add(24*time.Hour))
+	cfg, err := db.CreateConfig(ctx, user.ID, "test.txt", "test@example.com", "0 0 * * *", false, "test config", time.Now().Add(24*time.Hour))
 	if err != nil {
 		t.Fatalf("create config: %v", err)
 	}
@@ -54,7 +54,7 @@ func TestEmailTracking(t *testing.T) {
 	})
 
 	t.Run("DeactivateInactiveConfigs", func(t *testing.T) {
-		cfg2, err := db.CreateConfig(ctx, user.ID, "inactive.txt", "inactive@example.com", "0 0 * * *", true, false, "inactive config", time.Now().Add(24*time.Hour))
+		cfg2, err := db.CreateConfig(ctx, user.ID, "inactive.txt", "inactive@example.com", "0 0 * * *", false, "inactive config", time.Now().Add(24*time.Hour))
 		if err != nil {
 			t.Fatalf("create config: %v", err)
 		}

@@ -178,7 +178,6 @@ func TestValidate_CompleteConfig(t *testing.T) {
 	cfg := &ParsedConfig{
 		Email:    "user@example.com",
 		CronExpr: "0 9 * * *",
-		Digest:   true,
 		Inline:   false,
 		Feeds: []FeedEntry{
 			{URL: "https://blog.example.com/feed.xml", Name: "Example Blog"},

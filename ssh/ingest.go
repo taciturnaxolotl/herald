@@ -82,7 +82,7 @@ func (u *uploader) ingest(ctx context.Context, user *store.User, remoteAddr net.
 	}
 
 	err = u.store.WithTx(ctx, func(q *store.Queries) error {
-		cfg, created, err := q.UpsertConfig(ctx, user.ID, filename, parsed.Email, parsed.CronExpr, parsed.Digest, parsed.Inline, content, schedule)
+		cfg, created, err := q.UpsertConfig(ctx, user.ID, filename, parsed.Email, parsed.CronExpr, parsed.Inline, content, schedule)
 		if err != nil {
 			return err
 		}

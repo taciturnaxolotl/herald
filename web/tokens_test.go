@@ -16,7 +16,7 @@ func TestUnsubscribeDeleteRemovesAccount(t *testing.T) {
 	ctx := context.Background()
 
 	user, _ := st.GetOrCreateUser(ctx, "fp", "key")
-	cfg, err := st.CreateConfig(ctx, user.ID, "daily.txt", "a@example.com", "0 8 * * *", true, false, "raw", time.Now())
+	cfg, err := st.CreateConfig(ctx, user.ID, "daily.txt", "a@example.com", "0 8 * * *", false, "raw", time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +44,7 @@ func TestOneClickUnsubscribePausesAndSpendsToken(t *testing.T) {
 	ctx := context.Background()
 
 	user, _ := st.GetOrCreateUser(ctx, "fp", "key")
-	cfg, _ := st.CreateConfig(ctx, user.ID, "daily.txt", "a@example.com", "0 8 * * *", true, false, "raw", time.Now())
+	cfg, _ := st.CreateConfig(ctx, user.ID, "daily.txt", "a@example.com", "0 8 * * *", false, "raw", time.Now())
 	token, _ := st.GetOrCreateUnsubscribeToken(ctx, cfg.ID)
 
 	post := func() int {
@@ -71,7 +71,7 @@ func TestVerifyPostActivatesDigests(t *testing.T) {
 	ctx := context.Background()
 
 	user, _ := st.GetOrCreateUser(ctx, "fp", "key")
-	cfg, _ := st.CreateConfig(ctx, user.ID, "daily.txt", "a@example.com", "0 8 * * *", true, false, "raw", time.Now())
+	cfg, _ := st.CreateConfig(ctx, user.ID, "daily.txt", "a@example.com", "0 8 * * *", false, "raw", time.Now())
 	_ = st.SetNextRun(ctx, cfg.ID, nil)
 	v, err := st.EnsurePendingVerification(ctx, user.ID, "a@example.com")
 	if err != nil {

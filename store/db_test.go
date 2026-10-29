@@ -108,7 +108,7 @@ func TestDeleteUser(t *testing.T) {
 	ctx := context.Background()
 
 	user, _ := db.GetOrCreateUser(ctx, "test-fp", "test-pubkey")
-	cfg, err := db.CreateConfig(ctx, user.ID, "a.txt", "user@example.com", "0 8 * * *", true, false, "raw", time.Now())
+	cfg, err := db.CreateConfig(ctx, user.ID, "a.txt", "user@example.com", "0 8 * * *", false, "raw", time.Now())
 	if err != nil {
 		t.Fatalf("CreateConfig failed: %v", err)
 	}
@@ -137,7 +137,7 @@ func TestCreateConfig(t *testing.T) {
 	user, _ := db.GetOrCreateUser(ctx, "test-fp", "test-pubkey")
 	nextRun := time.Now().Add(time.Hour)
 
-	cfg, err := db.CreateConfig(ctx, user.ID, "test.herald", "user@example.com", "0 8 * * *", true, false, "raw config text", nextRun)
+	cfg, err := db.CreateConfig(ctx, user.ID, "test.herald", "user@example.com", "0 8 * * *", false, "raw config text", nextRun)
 	if err != nil {
 		t.Fatalf("CreateConfig failed: %v", err)
 	}
@@ -159,8 +159,8 @@ func TestListConfigs(t *testing.T) {
 
 	user, _ := db.GetOrCreateUser(ctx, "test-fp", "test-pubkey")
 	nextRun := time.Now().Add(time.Hour)
-	_, _ = db.CreateConfig(ctx, user.ID, "config1.herald", "user@example.com", "0 8 * * *", true, false, "raw1", nextRun)
-	_, _ = db.CreateConfig(ctx, user.ID, "config2.herald", "user@example.com", "0 9 * * *", false, true, "raw2", nextRun)
+	_, _ = db.CreateConfig(ctx, user.ID, "config1.herald", "user@example.com", "0 8 * * *", false, "raw1", nextRun)
+	_, _ = db.CreateConfig(ctx, user.ID, "config2.herald", "user@example.com", "0 9 * * *", true, "raw2", nextRun)
 
 	configs, err := db.ListConfigs(ctx, user.ID)
 	if err != nil {
@@ -178,7 +178,7 @@ func TestGetConfigByID(t *testing.T) {
 
 	user, _ := db.GetOrCreateUser(ctx, "test-fp", "test-pubkey")
 	nextRun := time.Now().Add(time.Hour)
-	created, _ := db.CreateConfig(ctx, user.ID, "test.herald", "user@example.com", "0 8 * * *", true, false, "raw", nextRun)
+	created, _ := db.CreateConfig(ctx, user.ID, "test.herald", "user@example.com", "0 8 * * *", false, "raw", nextRun)
 
 	cfg, err := db.GetConfigByID(ctx, created.ID)
 	if err != nil {
@@ -196,7 +196,7 @@ func TestGetConfig(t *testing.T) {
 
 	user, _ := db.GetOrCreateUser(ctx, "test-fp", "test-pubkey")
 	nextRun := time.Now().Add(time.Hour)
-	created, _ := db.CreateConfig(ctx, user.ID, "test.herald", "user@example.com", "0 8 * * *", true, false, "raw", nextRun)
+	created, _ := db.CreateConfig(ctx, user.ID, "test.herald", "user@example.com", "0 8 * * *", false, "raw", nextRun)
 
 	cfg, err := db.GetConfig(ctx, user.ID, "test.herald")
 	if err != nil {
@@ -214,7 +214,7 @@ func TestDeleteConfig(t *testing.T) {
 
 	user, _ := db.GetOrCreateUser(ctx, "test-fp", "test-pubkey")
 	nextRun := time.Now().Add(time.Hour)
-	_, _ = db.CreateConfig(ctx, user.ID, "test.herald", "user@example.com", "0 8 * * *", true, false, "raw", nextRun)
+	_, _ = db.CreateConfig(ctx, user.ID, "test.herald", "user@example.com", "0 8 * * *", false, "raw", nextRun)
 
 	err := db.DeleteConfig(ctx, user.ID, "test.herald")
 	if err != nil {
@@ -233,7 +233,7 @@ func TestCreateFeed(t *testing.T) {
 
 	user, _ := db.GetOrCreateUser(ctx, "test-fp", "test-pubkey")
 	nextRun := time.Now().Add(time.Hour)
-	cfg, _ := db.CreateConfig(ctx, user.ID, "test.herald", "user@example.com", "0 8 * * *", true, false, "raw", nextRun)
+	cfg, _ := db.CreateConfig(ctx, user.ID, "test.herald", "user@example.com", "0 8 * * *", false, "raw", nextRun)
 
 	feed, err := db.CreateFeed(ctx, cfg.ID, "https://example.com/feed.xml", "Example Feed")
 	if err != nil {
@@ -254,7 +254,7 @@ func TestGetFeedsByConfig(t *testing.T) {
 
 	user, _ := db.GetOrCreateUser(ctx, "test-fp", "test-pubkey")
 	nextRun := time.Now().Add(time.Hour)
-	cfg, _ := db.CreateConfig(ctx, user.ID, "test.herald", "user@example.com", "0 8 * * *", true, false, "raw", nextRun)
+	cfg, _ := db.CreateConfig(ctx, user.ID, "test.herald", "user@example.com", "0 8 * * *", false, "raw", nextRun)
 	_, _ = db.CreateFeed(ctx, cfg.ID, "https://feed1.com/rss", "Feed 1")
 	_, _ = db.CreateFeed(ctx, cfg.ID, "https://feed2.com/atom", "Feed 2")
 
@@ -274,7 +274,7 @@ func TestMarkItemSeen(t *testing.T) {
 
 	user, _ := db.GetOrCreateUser(ctx, "test-fp", "test-pubkey")
 	nextRun := time.Now().Add(time.Hour)
-	cfg, _ := db.CreateConfig(ctx, user.ID, "test.herald", "user@example.com", "0 8 * * *", true, false, "raw", nextRun)
+	cfg, _ := db.CreateConfig(ctx, user.ID, "test.herald", "user@example.com", "0 8 * * *", false, "raw", nextRun)
 	feed, _ := db.CreateFeed(ctx, cfg.ID, "https://example.com/feed.xml", "")
 
 	err := db.MarkItemSeen(ctx, feed.ID, "item-guid-123", "Item Title", "https://example.com/item")
@@ -297,7 +297,7 @@ func TestIsItemSeen_NotSeen(t *testing.T) {
 
 	user, _ := db.GetOrCreateUser(ctx, "test-fp", "test-pubkey")
 	nextRun := time.Now().Add(time.Hour)
-	cfg, _ := db.CreateConfig(ctx, user.ID, "test.herald", "user@example.com", "0 8 * * *", true, false, "raw", nextRun)
+	cfg, _ := db.CreateConfig(ctx, user.ID, "test.herald", "user@example.com", "0 8 * * *", false, "raw", nextRun)
 	feed, _ := db.CreateFeed(ctx, cfg.ID, "https://example.com/feed.xml", "")
 
 	seen, err := db.GetSeenGUIDs(ctx, feed.ID, []string{"nonexistent-guid"})
@@ -315,7 +315,7 @@ func TestGetSeenGUIDs(t *testing.T) {
 
 	user, _ := db.GetOrCreateUser(ctx, "test-fp", "test-pubkey")
 	nextRun := time.Now().Add(time.Hour)
-	cfg, _ := db.CreateConfig(ctx, user.ID, "test.herald", "user@example.com", "0 8 * * *", true, false, "raw", nextRun)
+	cfg, _ := db.CreateConfig(ctx, user.ID, "test.herald", "user@example.com", "0 8 * * *", false, "raw", nextRun)
 	feed, _ := db.CreateFeed(ctx, cfg.ID, "https://example.com/feed.xml", "")
 
 	// Mark some items as seen
@@ -345,7 +345,7 @@ func TestCleanupOldSeenItems(t *testing.T) {
 
 	user, _ := db.GetOrCreateUser(ctx, "test-fp", "test-pubkey")
 	nextRun := time.Now().Add(time.Hour)
-	cfg, _ := db.CreateConfig(ctx, user.ID, "test.herald", "user@example.com", "0 8 * * *", true, false, "raw", nextRun)
+	cfg, _ := db.CreateConfig(ctx, user.ID, "test.herald", "user@example.com", "0 8 * * *", false, "raw", nextRun)
 	feed, _ := db.CreateFeed(ctx, cfg.ID, "https://example.com/feed.xml", "")
 
 	// Mark item as seen
@@ -400,7 +400,7 @@ func TestOpenUpgradesOldConfigsTable(t *testing.T) {
 
 	ctx := context.Background()
 	user, _ := db.GetOrCreateUser(ctx, "fp", "key")
-	if _, err := db.CreateConfig(ctx, user.ID, "a.txt", "a@example.com", "0 8 * * *", true, false, "raw", time.Now()); err != nil {
+	if _, err := db.CreateConfig(ctx, user.ID, "a.txt", "a@example.com", "0 8 * * *", false, "raw", time.Now()); err != nil {
 		t.Fatalf("CreateConfig after upgrade failed: %v", err)
 	}
 	if _, err := db.GetConfig(ctx, user.ID, "a.txt"); err != nil {
@@ -413,7 +413,7 @@ func TestUpdateLastRunKeepsPausedConfigPaused(t *testing.T) {
 	ctx := context.Background()
 
 	user, _ := db.GetOrCreateUser(ctx, "fp", "key")
-	cfg, err := db.CreateConfig(ctx, user.ID, "a.txt", "a@example.com", "0 8 * * *", true, false, "raw", time.Now())
+	cfg, err := db.CreateConfig(ctx, user.ID, "a.txt", "a@example.com", "0 8 * * *", false, "raw", time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -456,7 +456,7 @@ func TestUpsertConfig(t *testing.T) {
 	user, _ := db.GetOrCreateUser(ctx, "fp", "key")
 	next := time.Now().UTC().Add(time.Hour)
 
-	cfg, created, err := db.UpsertConfig(ctx, user.ID, "a.txt", "a@example.com", "0 8 * * *", true, false, "v1", nil)
+	cfg, created, err := db.UpsertConfig(ctx, user.ID, "a.txt", "a@example.com", "0 8 * * *", false, "v1", nil)
 	if err != nil || !created {
 		t.Fatalf("first upsert = %v, created %v", err, created)
 	}
@@ -464,7 +464,7 @@ func TestUpsertConfig(t *testing.T) {
 		t.Error("a nil next run should store the config paused")
 	}
 
-	again, created, err := db.UpsertConfig(ctx, user.ID, "a.txt", "b@example.com", "0 9 * * *", true, true, "v2", &next)
+	again, created, err := db.UpsertConfig(ctx, user.ID, "a.txt", "b@example.com", "0 9 * * *", true, "v2", &next)
 	if err != nil || created {
 		t.Fatalf("second upsert = %v, created %v", err, created)
 	}
@@ -477,7 +477,7 @@ func TestCleanupOldLogs(t *testing.T) {
 	db := setupTestDB(t)
 	ctx := context.Background()
 	user, _ := db.GetOrCreateUser(ctx, "fp", "key")
-	cfg, _ := db.CreateConfig(ctx, user.ID, "a.txt", "a@example.com", "0 8 * * *", true, false, "raw", time.Now())
+	cfg, _ := db.CreateConfig(ctx, user.ID, "a.txt", "a@example.com", "0 8 * * *", false, "raw", time.Now())
 	_ = db.AddLog(ctx, cfg.ID, "info", "old")
 	_ = db.AddLog(ctx, cfg.ID, "info", "new")
 	if _, err := db.q.ExecContext(ctx, `UPDATE logs SET created_at = ? WHERE message = 'old'`, time.Now().UTC().AddDate(-1, 0, 0)); err != nil {

@@ -12,7 +12,7 @@ func TestRoutes(t *testing.T) {
 	srv, st := newTestServer(t)
 	ctx := context.Background()
 	user, _ := st.GetOrCreateUser(ctx, "SHA256:abcdefghijk", "key")
-	if _, err := st.CreateConfig(ctx, user.ID, "news.txt", "a@example.com", "0 8 * * *", true, false, "raw config", time.Now()); err != nil {
+	if _, err := st.CreateConfig(ctx, user.ID, "news.txt", "a@example.com", "0 8 * * *", false, "raw config", time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	fp := user.PubkeyFP

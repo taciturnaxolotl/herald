@@ -42,7 +42,7 @@ func TestVerificationLifecycle(t *testing.T) {
 	}
 
 	// A config for this pair, held inactive pending confirmation.
-	cfg, err := db.CreateConfig(ctx, user.ID, "daily.txt", email, "0 8 * * *", true, false, "raw", time.Now())
+	cfg, err := db.CreateConfig(ctx, user.ID, "daily.txt", email, "0 8 * * *", false, "raw", time.Now())
 	if err != nil {
 		t.Fatalf("create config: %v", err)
 	}

@@ -39,7 +39,7 @@ func setup(t *testing.T, mailer *fakeMailer) (*Scheduler, *store.DB, *store.Conf
 
 	ctx := context.Background()
 	user, _ := st.GetOrCreateUser(ctx, "fp", "key")
-	cfg, err := st.CreateConfig(ctx, user.ID, "daily.txt", "a@example.com", "0 8 * * *", true, false, "=: email a@example.com", time.Now().Add(-time.Minute))
+	cfg, err := st.CreateConfig(ctx, user.ID, "daily.txt", "a@example.com", "0 8 * * *", false, "=: email a@example.com", time.Now().Add(-time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}

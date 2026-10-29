@@ -12,9 +12,6 @@ func TestParse_Empty(t *testing.T) {
 	if cfg == nil {
 		t.Fatal("expected non-nil config")
 	}
-	if !cfg.Digest {
-		t.Error("expected Digest default to be true")
-	}
 	if cfg.Inline {
 		t.Error("expected Inline default to be false")
 	}
@@ -61,26 +58,9 @@ func TestParse_CronDirective(t *testing.T) {
 	}
 }
 
-func TestParse_DigestDirective(t *testing.T) {
-	tests := []struct {
-		input    string
-		expected bool
-	}{
-		{"=: digest true", true},
-		{"=: digest false", false},
-		{"=: digest 1", true},
-		{"=: digest 0", false},
-		{"=: digest invalid", true}, // default
-	}
-
-	for _, tt := range tests {
-		cfg, err := Parse(tt.input)
-		if err != nil {
-			t.Fatalf("Parse(%q) failed: %v", tt.input, err)
-		}
-		if cfg.Digest != tt.expected {
-			t.Errorf("Parse(%q): expected Digest=%v, got %v", tt.input, tt.expected, cfg.Digest)
-		}
+func TestParse_DigestDirectiveIsAccepted(t *testing.T) {
+	if _, err := Parse("=: digest false"); err != nil {
+		t.Fatalf("pico.sh configs with a digest line must still parse: %v", err)
 	}
 }
 
@@ -196,9 +176,6 @@ func TestParse_CompleteConfig(t *testing.T) {
 	if cfg.CronExpr != "0 9 * * *" {
 		t.Errorf("cron wrong: %s", cfg.CronExpr)
 	}
-	if !cfg.Digest {
-		t.Error("digest should be true")
-	}
 	if cfg.Inline {
 		t.Error("inline should be false")
 	}
@@ -223,9 +200,6 @@ func TestParse_CaseInsensitiveDirectives(t *testing.T) {
 	}
 	if cfg.CronExpr != "0 8 * * *" {
 		t.Error("CRON directive not parsed")
-	}
-	if cfg.Digest {
-		t.Error("DIGEST directive not parsed")
 	}
 	if !cfg.Inline {
 		t.Error("INLINE directive not parsed")

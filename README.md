@@ -30,7 +30,6 @@ Create a `feeds.txt` file:
 ```text
 =: email you@example.com
 =: cron 0 8 * * *
-=: digest true
 => https://dunkirk.sh/atom.xml
 => https://news.ycombinator.com/rss
 => https://lobste.rs/rss "Lobsters"
@@ -102,9 +101,11 @@ After uploading a config, run `ssh herald.dunkirk.sh` to get your fingerprint, t
 | ------------------- | -------- | ------------------------------------------------- |
 | `=: email <addr>`   | Yes      | Recipient email address                           |
 | `=: cron <expr>`    | Yes      | Standard cron expression (5 fields)               |
-| `=: digest <bool>`  | No       | Combine all items into one email (default: true)  |
 | `=: inline <bool>`  | No       | Include article content in email (default: false) |
+| `=: strip_image_hosts <host>,...` | No | Remove images served from these hosts |
 | `=> <url> ["name"]` | Yes (1+) | RSS/Atom feed URL, optional display name          |
+
+Every send is a single digest. A `=: digest` line from a pico.sh config is accepted and ignored.
 
 ## Configuration
 

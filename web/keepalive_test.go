@@ -28,7 +28,7 @@ func TestKeepAliveOnlyRenewsOnPost(t *testing.T) {
 	ctx := context.Background()
 
 	user, _ := st.GetOrCreateUser(ctx, "fp", "key")
-	cfg, err := st.CreateConfig(ctx, user.ID, "daily.txt", "a@example.com", "0 8 * * *", true, false, "raw", time.Now())
+	cfg, err := st.CreateConfig(ctx, user.ID, "daily.txt", "a@example.com", "0 8 * * *", false, "raw", time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}

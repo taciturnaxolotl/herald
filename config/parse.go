@@ -15,7 +15,6 @@ type FeedEntry struct {
 type ParsedConfig struct {
 	Email           string
 	CronExpr        string
-	Digest          bool
 	Inline          bool
 	StripImageHosts []string
 	Feeds           []FeedEntry
@@ -25,7 +24,6 @@ var feedLineRegex = regexp.MustCompile(`^=>\s+(\S+)(?:\s+"([^"]*)")?$`)
 
 func Parse(text string) (*ParsedConfig, error) {
 	cfg := &ParsedConfig{
-		Digest: true,
 		Inline: false,
 		Feeds:  []FeedEntry{},
 	}
@@ -69,7 +67,7 @@ func parseDirective(cfg *ParsedConfig, line string) error {
 	case "cron":
 		cfg.CronExpr = value
 	case "digest":
-		cfg.Digest = parseBool(value, true)
+		// Accepted for pico.sh compatibility; every send is a digest.
 	case "inline":
 		cfg.Inline = parseBool(value, false)
 	case "strip_image_hosts":
