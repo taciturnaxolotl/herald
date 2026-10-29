@@ -355,3 +355,23 @@ func TestSanitizeHTML_StripsTinySizedImages(t *testing.T) {
 		t.Errorf("only the 32px image should be removed, got %q", out)
 	}
 }
+
+func TestRenderDigest_TextHasNoBlankRunsOrLeadingBlankLines(t *testing.T) {
+	data := &DigestData{
+		FeedGroups: []FeedGroup{
+			{FeedName: "A", FeedURL: "https://a/f", Items: []FeedItem{{Title: "1", Link: "https://a/1", Content: "<p>one</p>"}, {Title: "2", Link: "https://a/2"}}},
+			{FeedName: "B", FeedURL: "https://b/f", Items: []FeedItem{{Title: "3", Link: "https://b/3"}}},
+		},
+		TotalItems: 3,
+	}
+	_, text, err := RenderDigest(data, true, 90)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.HasPrefix(text, "\n") {
+		t.Errorf("text digest starts with blank lines: %q", text)
+	}
+	if strings.Contains(text, "\n\n\n\n") {
+		t.Errorf("text digest has runs of blank lines: %q", text)
+	}
+}

@@ -1,27 +1,30 @@
-{{if .ShowUrgentBanner}}
+{{- if .ShowUrgentBanner -}}
 Your digest expires {{.ExpiresIn}}. Click "keep this digest active" below to continue receiving updates or it will be deactivated.
 
-{{else if .ShowWarningBanner}}
+{{else if .ShowWarningBanner -}}
 Your digest expires {{.ExpiresIn}}. Click "keep this digest active" below to extend it.
 
-{{end}}
-{{range .FeedGroups}}
+{{end -}}
+{{range $i, $group := .FeedGroups -}}
+{{if $i}}
+
+{{end -}}
 {{.FeedName}}
 {{.FeedURL}}
 
 Summary
-
 {{range .Items}}
 {{.Title}}
 {{.Link}}
-{{if and $.Inline .PlainContent}}
+{{- if and $.Inline .PlainContent}}
 
 {{.PlainContent}}
-{{end}}
-{{end}}
-{{end}}
+{{- end}}
+{{end -}}
+{{end -}}
 {{if .FooterLinks}}
 
 ---
 {{range .FooterLinks}}{{.Label}}: {{.URL}}
-{{end}}{{end}}
+{{end -}}
+{{end -}}
