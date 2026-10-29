@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"strings"
+	"time"
 
 	"charm.land/log/v2"
 	"charm.land/ssh"
@@ -62,7 +63,7 @@ func (u *uploader) ingest(ctx context.Context, user *store.User, remoteAddr net.
 		return err
 	}
 
-	nextRun, err := calculateNextRun(parsed.CronExpr)
+	nextRun, err := config.NextRun(parsed.CronExpr, time.Now())
 	if err != nil {
 		return fmt.Errorf("failed to calculate next run: %w", err)
 	}

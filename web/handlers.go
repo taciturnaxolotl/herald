@@ -135,13 +135,12 @@ func (s *Server) handleUser(w http.ResponseWriter, r *http.Request, fingerprint 
 	for _, cfg := range configs {
 		feeds := feedsByConfig[cfg.ID]
 
-		isActive := cfg.NextRun.Valid
+		isActive := cfg.Active()
 		if isActive {
 			hasAnyActive = true
 		}
 
-		// Get engagement stats (last 90 days)
-		totalSends, err := s.store.CountRecentSends(ctx, cfg.ID, 90)
+		totalSends, err := s.store.CountRecentSends(ctx, cfg.ID, store.InactivityDays)
 		if err != nil {
 			s.logger.Warn("get engagement", "config_id", cfg.ID, "err", err)
 			// Continue without engagement data
@@ -153,13 +152,7 @@ func (s *Server) handleUser(w http.ResponseWriter, r *http.Request, fingerprint 
 			lastActiveDays = int(time.Since(cfg.LastActiveAt.Time).Hours() / 24)
 		}
 
-		// Calculate expiry from the most recent of created_at or last_active_at
-		expiryBase := cfg.CreatedAt
-		if cfg.LastActiveAt.Valid && cfg.LastActiveAt.Time.After(cfg.CreatedAt) {
-			expiryBase = cfg.LastActiveAt.Time
-		}
-		expiryDate := expiryBase.AddDate(0, 0, 90)
-		daysUntilExpiry := int(time.Until(expiryDate).Hours() / 24)
+		daysUntilExpiry := int(time.Until(cfg.ExpiresAt()).Hours() / 24)
 
 		configInfos = append(configInfos, configInfo{
 			Filename:        cfg.Filename,
@@ -173,7 +166,7 @@ func (s *Server) handleUser(w http.ResponseWriter, r *http.Request, fingerprint 
 			DaysUntilExpiry: daysUntilExpiry,
 		})
 
-		if cfg.NextRun.Valid {
+		if cfg.Active() {
 			if earliestNextRun.IsZero() || cfg.NextRun.Time.Before(earliestNextRun) {
 				earliestNextRun = cfg.NextRun.Time
 			}
@@ -678,7 +671,7 @@ func (s *Server) handleKeepAlive(w http.ResponseWriter, r *http.Request, token s
 
 	data := keepAlivePageData{
 		Filename:  cfg.Filename,
-		ExpiresAt: time.Now().AddDate(0, 0, 90).Format("January 2, 2006"),
+		ExpiresAt: time.Now().AddDate(0, 0, store.InactivityDays).Format("January 2, 2006"),
 	}
 
 	switch r.Method {

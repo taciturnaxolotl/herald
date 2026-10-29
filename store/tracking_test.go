@@ -53,7 +53,7 @@ func TestEmailTracking(t *testing.T) {
 		}
 	})
 
-	t.Run("GetInactiveConfigs", func(t *testing.T) {
+	t.Run("DeactivateInactiveConfigs", func(t *testing.T) {
 		cfg2, err := db.CreateConfig(ctx, user.ID, "inactive.txt", "inactive@example.com", "0 0 * * *", true, false, "inactive config", time.Now().Add(24*time.Hour))
 		if err != nil {
 			t.Fatalf("create config: %v", err)
@@ -63,17 +63,23 @@ func TestEmailTracking(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		old := time.Now().UTC().AddDate(0, 0, -100)
+		old := time.Now().UTC().AddDate(0, 0, -InactivityDays-10)
 		if _, err := db.q.ExecContext(ctx, `UPDATE configs SET created_at = ? WHERE id = ?`, old, cfg2.ID); err != nil {
 			t.Fatal(err)
 		}
 
-		ids, err := db.GetInactiveConfigs(ctx, 90, 3)
+		paused, err := db.DeactivateInactiveConfigs(ctx, 3)
 		if err != nil {
-			t.Fatalf("get inactive configs: %v", err)
+			t.Fatalf("deactivate inactive configs: %v", err)
 		}
-		if len(ids) != 1 || ids[0] != cfg2.ID {
-			t.Fatalf("expected only the old, never-renewed config, got %v", ids)
+		if len(paused) != 1 || paused[0].ID != cfg2.ID {
+			t.Fatalf("expected only the old, never-renewed config, got %+v", paused)
+		}
+		if got, _ := db.GetConfigByID(ctx, cfg2.ID); got.Active() {
+			t.Fatal("inactive config should be paused")
+		}
+		if again, _ := db.DeactivateInactiveConfigs(ctx, 3); len(again) != 0 {
+			t.Fatal("an already paused config should not be reported again")
 		}
 	})
 

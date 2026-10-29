@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"charm.land/log/v2"
-	"github.com/adhocore/gronx"
 	"github.com/taciturnaxolotl/herald/config"
 	"github.com/taciturnaxolotl/herald/email"
 	"github.com/taciturnaxolotl/herald/ratelimit"
@@ -32,9 +31,7 @@ const (
 	// Digests with more items than this skip inline content.
 	maxInlineItems = 5
 
-	// Engagement tracking
-	inactivityThreshold      = 90 // days without opens
-	minSendsBeforeDeactivate = 3  // minimum sends before considering deactivation
+	minSendsBeforeDeactivate = 3 // digests sent before inactivity can pause a config
 
 	// Confirmed opt-in (double opt-in) limits. A destination address gets at
 	// most one confirmation prompt per cooldown regardless of source (durable,
@@ -255,38 +252,14 @@ func (s *Scheduler) checkAndDeactivateInactiveConfigs(ctx context.Context) {
 		}
 	}()
 
-	inactiveConfigs, err := s.store.GetInactiveConfigs(ctx, inactivityThreshold, minSendsBeforeDeactivate)
+	paused, err := s.store.DeactivateInactiveConfigs(ctx, minSendsBeforeDeactivate)
 	if err != nil {
-		s.logger.Error("failed to get inactive configs", "err", err)
+		s.logger.Error("failed to deactivate inactive configs", "err", err)
 		return
 	}
-
-	if len(inactiveConfigs) == 0 {
-		return
-	}
-
-	s.logger.Info("found inactive configs", "count", len(inactiveConfigs))
-
-	for _, configID := range inactiveConfigs {
-		cfg, err := s.store.GetConfigByID(ctx, configID)
-		if err != nil {
-			s.logger.Error("failed to get config", "config_id", configID, "err", err)
-			continue
-		}
-
-		// Only deactivate if next_run is set (config is active)
-		if !cfg.NextRun.Valid {
-			continue
-		}
-
-		// Deactivate by setting next_run to NULL
-		if err := s.store.SetNextRun(ctx, configID, nil); err != nil {
-			s.logger.Error("failed to deactivate inactive config", "config_id", configID, "err", err)
-			continue
-		}
-
-		s.logger.Info("deactivated inactive config", "config_id", configID, "email", cfg.Email)
-		_ = s.store.AddLog(ctx, configID, "info", fmt.Sprintf("Auto-deactivated due to no email opens in %d days", inactivityThreshold))
+	for _, cfg := range paused {
+		s.logger.Info("deactivated inactive config", "config_id", cfg.ID, "email", cfg.Email)
+		_ = s.store.AddLog(ctx, cfg.ID, "info", fmt.Sprintf("Paused: the keep-alive link was not used in %d days", store.InactivityDays))
 	}
 }
 
@@ -333,7 +306,7 @@ func (s *Scheduler) run(ctx context.Context, cfg *store.Config, progress *atomic
 	// Record the run even if the caller has gone away mid-send.
 	ctx = context.WithoutCancel(ctx)
 	now := time.Now().UTC()
-	nextRun, err := gronx.NextTickAfter(cfg.CronExpr, now, true)
+	nextRun, err := config.NextRun(cfg.CronExpr, now)
 	if err != nil {
 		return stats, errors.Join(runErr, fmt.Errorf("calculate next run: %w", err))
 	}
@@ -344,7 +317,7 @@ func (s *Scheduler) run(ctx context.Context, cfg *store.Config, progress *atomic
 	switch {
 	case runErr != nil:
 		_ = s.store.AddLog(ctx, cfg.ID, "error", fmt.Sprintf("Failed: %v", runErr))
-	case !cfg.NextRun.Valid:
+	case !cfg.Active():
 		_ = s.store.AddLog(ctx, cfg.ID, "info", fmt.Sprintf("Processed: %d new items, digest is paused", newItems))
 	default:
 		_ = s.store.AddLog(ctx, cfg.ID, "info", fmt.Sprintf("Processed: %d new items, next run: %s", newItems, nextRun.Format(time.RFC3339)))
@@ -490,11 +463,7 @@ func (s *Scheduler) sendDigest(ctx context.Context, cfg *store.Config, batch dig
 	}
 	inline := cfg.InlineContent && total <= maxInlineItems
 
-	expiryBase := cfg.CreatedAt
-	if cfg.LastActiveAt.Valid && cfg.LastActiveAt.Time.After(cfg.CreatedAt) {
-		expiryBase = cfg.LastActiveAt.Time
-	}
-	daysUntilExpiry := int(time.Until(expiryBase.AddDate(0, 0, 90)).Hours() / 24)
+	daysUntilExpiry := int(time.Until(cfg.ExpiresAt()).Hours() / 24)
 
 	htmlBody, textBody, err := email.RenderDigest(digestData, inline, daysUntilExpiry)
 	if err != nil {

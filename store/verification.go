@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/adhocore/gronx"
+	"github.com/taciturnaxolotl/herald/config"
 )
 
 // Verification is the confirmed-opt-in state for a (user, email) pair.
@@ -194,7 +194,7 @@ func (q *Queries) ActivateConfigsForEmail(ctx context.Context, userID int64, ema
 
 	now := time.Now().UTC()
 	for _, p := range configs {
-		nextRun, err := gronx.NextTickAfter(p.cron, now, true)
+		nextRun, err := config.NextRun(p.cron, now)
 		if err != nil {
 			continue // leave a config with a bad cron inactive
 		}

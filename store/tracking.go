@@ -18,27 +18,22 @@ func (q *Queries) RecordEmailSend(ctx context.Context, configID int64, recipient
 	return nil
 }
 
-// GetInactiveConfigs returns configs sent at least minSends digests with no
-// keep-alive in the last daysWithoutActivity days.
-func (q *Queries) GetInactiveConfigs(ctx context.Context, daysWithoutActivity int, minSends int) ([]int64, error) {
-	cutoff := time.Now().UTC().AddDate(0, 0, -daysWithoutActivity)
-	ids, err := queryAll(ctx, q.q, func(s scanner) (*int64, error) {
-		var id int64
-		return &id, s.Scan(&id)
-	},
-		`SELECT c.id FROM configs c
-		 WHERE (SELECT COUNT(*) FROM email_sends es WHERE es.config_id = c.id) >= ?
-		   AND (c.last_active_at IS NULL OR c.last_active_at < ?)
-		   AND c.created_at < ?`,
+// DeactivateInactiveConfigs pauses active digests that were sent at least
+// minSends times with no keep-alive in InactivityDays, returning them.
+func (q *Queries) DeactivateInactiveConfigs(ctx context.Context, minSends int) ([]*Config, error) {
+	cutoff := time.Now().UTC().AddDate(0, 0, -InactivityDays)
+	configs, err := queryAll(ctx, q.q, scanConfig,
+		`UPDATE configs SET next_run = NULL
+		 WHERE next_run IS NOT NULL
+		   AND (SELECT COUNT(*) FROM email_sends es WHERE es.config_id = configs.id) >= ?
+		   AND (last_active_at IS NULL OR last_active_at < ?)
+		   AND created_at < ?
+		 RETURNING `+configCols,
 		minSends, cutoff, cutoff)
 	if err != nil {
-		return nil, fmt.Errorf("query inactive configs: %w", err)
+		return nil, fmt.Errorf("deactivate inactive configs: %w", err)
 	}
-	out := make([]int64, len(ids))
-	for i, id := range ids {
-		out[i] = *id
-	}
-	return out, nil
+	return configs, nil
 }
 
 // CountRecentSends returns how many digests a config was sent in the last days.

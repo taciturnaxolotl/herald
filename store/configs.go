@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/adhocore/gronx"
+	"github.com/taciturnaxolotl/herald/config"
 )
 
 type Config struct {
@@ -22,6 +22,21 @@ type Config struct {
 	NextRun       sql.NullTime
 	CreatedAt     time.Time
 	LastActiveAt  sql.NullTime
+}
+
+// InactivityDays is how long a digest keeps sending without a keep-alive click.
+const InactivityDays = 90
+
+// Active reports whether the config is scheduled to send.
+func (c *Config) Active() bool { return c.NextRun.Valid }
+
+// ExpiresAt is when the digest pauses unless its keep-alive link is used.
+func (c *Config) ExpiresAt() time.Time {
+	base := c.CreatedAt
+	if c.LastActiveAt.Valid && c.LastActiveAt.Time.After(base) {
+		base = c.LastActiveAt.Time
+	}
+	return base.AddDate(0, 0, InactivityDays)
 }
 
 const configCols = `id, user_id, filename, email, cron_expr, digest, inline_content, raw_text, last_run, next_run, created_at, last_active_at`
@@ -143,7 +158,7 @@ func (q *Queries) SetNextRun(ctx context.Context, configID int64, nextRun *time.
 
 // ActivateConfig schedules cfg for its next cron tick.
 func (q *Queries) ActivateConfig(ctx context.Context, cfg *Config) error {
-	nextRun, err := gronx.NextTickAfter(cfg.CronExpr, time.Now().UTC(), true)
+	nextRun, err := config.NextRun(cfg.CronExpr, time.Now())
 	if err != nil {
 		return fmt.Errorf("calculate next run: %w", err)
 	}

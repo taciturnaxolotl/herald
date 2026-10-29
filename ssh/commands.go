@@ -122,7 +122,7 @@ func handleLs(ctx context.Context, sess ssh.Session, user *store.User, st *store
 		}
 
 		nextRunStr := "never"
-		if cfg.NextRun.Valid {
+		if cfg.Active() {
 			nextRunStr = formatRelativeTime(cfg.NextRun.Time)
 		}
 

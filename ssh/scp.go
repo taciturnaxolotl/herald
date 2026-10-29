@@ -11,7 +11,6 @@ import (
 
 	"charm.land/ssh"
 	"charm.land/wish/v2/scp"
-	"github.com/adhocore/gronx"
 	"github.com/taciturnaxolotl/herald/store"
 )
 
@@ -132,10 +131,6 @@ func rateLimitIPKey(addr net.Addr) string {
 		return v4.String()
 	}
 	return ip.Mask(net.CIDRMask(64, 128)).String() + "/64"
-}
-
-func calculateNextRun(cronExpr string) (time.Time, error) {
-	return gronx.NextTickAfter(cronExpr, time.Now().UTC(), true)
 }
 
 type configFileInfo struct {

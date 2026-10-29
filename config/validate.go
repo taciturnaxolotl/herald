@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/mail"
 	"strings"
+	"time"
 
 	"github.com/adhocore/gronx"
 	"github.com/taciturnaxolotl/herald/safehttp"
@@ -102,4 +103,9 @@ func (e FeedErrors) Error() string {
 		parts[i] = fe.Error()
 	}
 	return fmt.Sprintf("%d feed(s) failed validation: %s", len(e), strings.Join(parts, "; "))
+}
+
+// NextRun returns the first cron tick strictly after after, in UTC.
+func NextRun(cronExpr string, after time.Time) (time.Time, error) {
+	return gronx.NextTickAfter(cronExpr, after.UTC(), true)
 }

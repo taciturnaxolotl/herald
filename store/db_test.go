@@ -436,3 +436,16 @@ func TestUpdateLastRunKeepsPausedConfigPaused(t *testing.T) {
 		t.Error("last run should still be recorded")
 	}
 }
+
+func TestConfigExpiresAt(t *testing.T) {
+	created := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	cfg := &Config{CreatedAt: created}
+	if got, want := cfg.ExpiresAt(), created.AddDate(0, 0, InactivityDays); !got.Equal(want) {
+		t.Errorf("ExpiresAt without keep-alive = %v, want %v", got, want)
+	}
+	active := created.AddDate(0, 0, 30)
+	cfg.LastActiveAt = sql.NullTime{Time: active, Valid: true}
+	if got, want := cfg.ExpiresAt(), active.AddDate(0, 0, InactivityDays); !got.Equal(want) {
+		t.Errorf("ExpiresAt after keep-alive = %v, want %v", got, want)
+	}
+}
