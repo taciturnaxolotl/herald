@@ -42,6 +42,7 @@ func Validate(cfg *ParsedConfig) error {
 		return ErrBadCron
 	}
 
+	cfg.Feeds = dedupeFeeds(cfg.Feeds)
 	if len(cfg.Feeds) == 0 {
 		return ErrNoFeeds
 	}
@@ -60,6 +61,19 @@ func Validate(cfg *ParsedConfig) error {
 		return errs
 	}
 	return nil
+}
+
+// dedupeFeeds keeps the first entry for each URL, so a feed listed twice is fetched and mailed once.
+func dedupeFeeds(feeds []FeedEntry) []FeedEntry {
+	seen := make(map[string]bool, len(feeds))
+	var out []FeedEntry
+	for _, f := range feeds {
+		if !seen[f.URL] {
+			seen[f.URL] = true
+			out = append(out, f)
+		}
+	}
+	return out
 }
 
 // FeedError records why a single feed URL could not be used.

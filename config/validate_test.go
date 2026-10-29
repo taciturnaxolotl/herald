@@ -200,3 +200,21 @@ func TestValidate_TooManyFeeds(t *testing.T) {
 		t.Errorf("expected ErrTooManyFeeds, got %v", err)
 	}
 }
+
+func TestValidate_DedupesFeeds(t *testing.T) {
+	cfg := &ParsedConfig{
+		Email:    "a@example.com",
+		CronExpr: "0 8 * * *",
+		Feeds: []FeedEntry{
+			{URL: "https://example.com/feed.xml", Name: "First"},
+			{URL: "https://example.org/feed.xml"},
+			{URL: "https://example.com/feed.xml", Name: "Second"},
+		},
+	}
+	if err := Validate(cfg); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	if len(cfg.Feeds) != 2 || cfg.Feeds[0].Name != "First" {
+		t.Fatalf("expected duplicates collapsed to the first entry, got %+v", cfg.Feeds)
+	}
+}
