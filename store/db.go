@@ -153,8 +153,49 @@ func (db *DB) migrate() error {
 	CREATE INDEX IF NOT EXISTS idx_email_sends_sent_at ON email_sends(sent_at);
 	`
 
-	_, err := db.Exec(schema)
-	return err
+	if _, err := db.Exec(schema); err != nil {
+		return err
+	}
+
+	for _, c := range addedColumns {
+		if err := db.ensureColumn(c.table, c.column, c.decl); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// addedColumns lists columns introduced after a table first shipped, since
+// CREATE TABLE IF NOT EXISTS never alters an existing table.
+var addedColumns = []struct{ table, column, decl string }{
+	{"configs", "last_active_at", "DATETIME"},
+}
+
+func (db *DB) ensureColumn(table, column, decl string) error {
+	rows, err := db.Query(fmt.Sprintf("SELECT name FROM pragma_table_info('%s')", table))
+	if err != nil {
+		return fmt.Errorf("inspect %s: %w", table, err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return err
+		}
+		if name == column {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	_ = rows.Close()
+
+	if _, err := db.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, decl)); err != nil {
+		return fmt.Errorf("add %s.%s: %w", table, column, err)
+	}
+	return nil
 }
 
 func (db *DB) Close() error {
@@ -221,10 +262,6 @@ func (db *DB) prepareStatements() error {
 	}
 
 	return nil
-}
-
-func (db *DB) Migrate() error {
-	return db.migrate()
 }
 
 func (db *DB) BeginTx(ctx context.Context) (*sql.Tx, error) {

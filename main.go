@@ -242,10 +242,6 @@ func runServer(ctx context.Context) error {
 	}
 	defer func() { _ = db.Close() }()
 
-	if err := db.Migrate(); err != nil {
-		return fmt.Errorf("failed to migrate database: %w", err)
-	}
-
 	mailer, err := email.NewMailer(email.SMTPConfig{
 		Host:               cfg.SMTP.Host,
 		Port:               cfg.SMTP.Port,

@@ -373,3 +373,46 @@ func TestCleanupOldSeenItems(t *testing.T) {
 		t.Log("No items deleted - this test may be timing-sensitive")
 	}
 }
+
+func TestOpenUpgradesOldConfigsTable(t *testing.T) {
+	path := t.TempDir() + "/old.db"
+	raw, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = raw.Exec(`
+	CREATE TABLE users (id INTEGER PRIMARY KEY, pubkey_fp TEXT UNIQUE NOT NULL, pubkey TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP);
+	CREATE TABLE configs (
+		id INTEGER PRIMARY KEY,
+		user_id INTEGER NOT NULL REFERENCES users(id),
+		filename TEXT NOT NULL,
+		email TEXT NOT NULL,
+		cron_expr TEXT NOT NULL,
+		digest BOOLEAN DEFAULT TRUE,
+		inline_content BOOLEAN DEFAULT FALSE,
+		raw_text TEXT NOT NULL,
+		last_run DATETIME,
+		next_run DATETIME,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		UNIQUE(user_id, filename)
+	);`)
+	_ = raw.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open on pre-last_active_at database failed: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	ctx := context.Background()
+	user, _ := db.GetOrCreateUser(ctx, "fp", "key")
+	if _, err := db.CreateConfig(ctx, user.ID, "a.txt", "a@example.com", "0 8 * * *", true, false, "raw", time.Now()); err != nil {
+		t.Fatalf("CreateConfig after upgrade failed: %v", err)
+	}
+	if _, err := db.GetConfig(ctx, user.ID, "a.txt"); err != nil {
+		t.Fatalf("GetConfig after upgrade failed: %v", err)
+	}
+}
