@@ -55,7 +55,7 @@ func (u *uploader) ingest(ctx context.Context, user *store.User, remoteAddr net.
 
 	parsed, err := config.Parse(content)
 	if err != nil {
-		return fmt.Errorf("failed to parse config: %w", err)
+		return err
 	}
 	if err := config.Validate(parsed); err != nil {
 		return fmt.Errorf("invalid config: %w", err)
@@ -156,6 +156,15 @@ func formatUploadError(filename string, err error) string {
 			fmt.Fprintf(&b, "  %s\n    %v\n\n", fe.URL, fe.Err)
 		}
 		b.WriteString("Nothing was saved. Fix or remove these feeds and upload again.\n")
+		return b.String()
+	}
+	var lineErrs config.LineErrors
+	if errors.As(err, &lineErrs) {
+		fmt.Fprintf(&b, "\nherald: rejected %s, it has lines Herald does not understand:\n\n", filename)
+		for _, le := range lineErrs {
+			fmt.Fprintf(&b, "  line %d: %s\n", le.Line, le.Msg)
+		}
+		b.WriteString("\nNothing was saved. Fix these lines and upload again.\n")
 		return b.String()
 	}
 	fmt.Fprintf(&b, "\nherald: rejected %s: %v\nNothing was saved.\n", filename, err)

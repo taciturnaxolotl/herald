@@ -1,6 +1,8 @@
 package config
 
 import (
+	"errors"
+	"slices"
 	"testing"
 )
 
@@ -73,7 +75,6 @@ func TestParse_InlineDirective(t *testing.T) {
 		{"=: inline false", false},
 		{"=: inline 1", true},
 		{"=: inline 0", false},
-		{"=: inline invalid", false}, // default
 	}
 
 	for _, tt := range tests {
@@ -206,26 +207,29 @@ func TestParse_CaseInsensitiveDirectives(t *testing.T) {
 	}
 }
 
-func TestParseBool(t *testing.T) {
-	tests := []struct {
-		input      string
-		defaultVal bool
-		expected   bool
-	}{
-		{"true", false, true},
-		{"false", true, false},
-		{"1", false, true},
-		{"0", true, false},
-		{"yes", false, false},   // invalid, returns default
-		{"no", true, true},      // invalid, returns default
-		{"", false, false},      // invalid, returns default
-		{"invalid", true, true}, // invalid, returns default
-	}
+func TestParse_ReportsEveryBadLine(t *testing.T) {
+	input := `=: email a@example.com
+=: emial typo@example.com
+=: cron
+=: inline yes
+=> https://ok.example/feed.xml
+=> https://bad.example/feed.xml "unterminated
+just some text
+=> https://ok2.example/feed.xml "Named"`
 
-	for _, tt := range tests {
-		result := parseBool(tt.input, tt.defaultVal)
-		if result != tt.expected {
-			t.Errorf("parseBool(%q, %v) = %v, expected %v", tt.input, tt.defaultVal, result, tt.expected)
-		}
+	cfg, err := Parse(input)
+	var lineErrs LineErrors
+	if !errors.As(err, &lineErrs) {
+		t.Fatalf("expected LineErrors, got %v", err)
+	}
+	var lines []int
+	for _, le := range lineErrs {
+		lines = append(lines, le.Line)
+	}
+	if want := []int{2, 3, 4, 6, 7}; !slices.Equal(lines, want) {
+		t.Fatalf("bad lines = %v, want %v (%v)", lines, want, err)
+	}
+	if cfg.Email != "a@example.com" || len(cfg.Feeds) != 2 {
+		t.Errorf("good lines should still parse, got %+v", cfg)
 	}
 }
