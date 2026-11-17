@@ -9,7 +9,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -106,11 +109,12 @@ func FetchFeed(ctx context.Context, feed *store.Feed) *FetchResult {
 		result.FeedName = parsedFeed.Title
 	}
 
+	base := linkBase(resp.Request.URL, parsedFeed.Link)
 	for _, item := range parsedFeed.Items {
 		fetchedItem := FetchedItem{
 			GUID:  item.GUID,
 			Title: item.Title,
-			Link:  item.Link,
+			Link:  resolveLink(base, item.Link),
 		}
 
 		if item.Content != "" {
@@ -118,6 +122,7 @@ func FetchFeed(ctx context.Context, feed *store.Feed) *FetchResult {
 		} else if item.Description != "" {
 			fetchedItem.Content = item.Description
 		}
+		// The raw link keeps ids stable with entries seen before links were resolved.
 		fetchedItem.GUID = itemGUID(item.GUID, item.Link, item.Title, fetchedItem.Content)
 
 		if item.PublishedParsed != nil {
@@ -155,6 +160,34 @@ type httpError struct {
 
 func (e *httpError) Error() string {
 	return fmt.Sprintf("server returned %d %s", e.StatusCode, http.StatusText(e.StatusCode))
+}
+
+// linkBase is where the feed was fetched from, or its site when that lives on another real host.
+func linkBase(fetched *url.URL, siteLink string) *url.URL {
+	site, err := url.Parse(siteLink)
+	if err != nil || (site.Scheme != "http" && site.Scheme != "https") {
+		return fetched
+	}
+	host := strings.ToLower(site.Hostname())
+	if host == "" || host == "localhost" || strings.HasSuffix(host, ".localhost") || net.ParseIP(host) != nil {
+		return fetched
+	}
+	if strings.EqualFold(host, fetched.Hostname()) {
+		return fetched
+	}
+	return site
+}
+
+// resolveLink makes a relative entry link absolute; empty links stay empty.
+func resolveLink(base *url.URL, link string) string {
+	if link == "" {
+		return link
+	}
+	ref, err := url.Parse(link)
+	if err != nil {
+		return link
+	}
+	return base.ResolveReference(ref).String()
 }
 
 // itemGUID identifies an item across fetches. Items with neither a GUID nor a
